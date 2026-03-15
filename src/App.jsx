@@ -1149,36 +1149,45 @@ function MarketsScreen({ partyId, balance, onLogout }) {
             <p style={{ fontSize: 18, fontWeight: 700, color: '#fff', fontFamily: 'JetBrains Mono', lineHeight: 1 }}>{mask(hasPositions ? fmtUSD(netWorth) : '—')}</p>
           </div>
 
-          {/* Supply / Borrow aggregate */}
-          <div style={{ display: 'flex', gap: 20, alignItems: 'center', borderRight: '1px solid #0d2424', paddingRight: 24, marginRight: 24, flexShrink: 0 }}>
-            <div>
-              <p style={{ fontSize: 9, color: '#4a7878', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>Supplied</p>
-              <p style={{ fontSize: 14, fontWeight: 600, color: '#14b8a6', fontFamily: 'JetBrains Mono', lineHeight: 1 }}>{mask(fmtUSD(totalSuppliedUSD))}</p>
-              {netAPY !== null && <p style={{ fontSize: 9, color: '#14b8a6aa', marginTop: 3 }}>{fmtPct(netAPY)} APY</p>}
-            </div>
-            <div>
-              <p style={{ fontSize: 9, color: '#4a7878', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>Borrowed</p>
-              <p style={{ fontSize: 14, fontWeight: 600, color: totalBorrowedUSD > 0 ? '#f59e0b' : '#3a6060', fontFamily: 'JetBrains Mono', lineHeight: 1 }}>{mask(fmtUSD(totalBorrowedUSD))}</p>
-              {totalBorrowedUSD > 0 && <p style={{ fontSize: 9, color: '#f59e0baa', marginTop: 3 }}>Outstanding</p>}
+          {/* Supply / Borrow — grouped card */}
+          <div style={{ borderRight: '1px solid #0d2424', paddingRight: 24, marginRight: 24, flexShrink: 0 }}>
+            <div style={{ display: 'flex', background: '#071a1a', border: '1px solid #112828', borderRadius: 10, overflow: 'hidden' }}>
+              <div style={{ padding: '9px 16px' }}>
+                <p style={{ fontSize: 8, color: '#4a7878', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 3 }}>Supplied</p>
+                <p style={{ fontSize: 14, fontWeight: 700, color: '#14b8a6', fontFamily: 'JetBrains Mono', lineHeight: 1 }}>{mask(fmtUSD(totalSuppliedUSD))}</p>
+                <p style={{ fontSize: 8, color: netAPY !== null ? '#14b8a6aa' : '#2a5050', marginTop: 3 }}>{netAPY !== null ? `${fmtPct(netAPY)} APY` : '—'}</p>
+              </div>
+              <div style={{ width: 1, background: '#112828', flexShrink: 0 }} />
+              <div style={{ padding: '9px 16px' }}>
+                <p style={{ fontSize: 8, color: '#4a7878', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 3 }}>Borrowed</p>
+                <p style={{ fontSize: 14, fontWeight: 700, color: totalBorrowedUSD > 0 ? '#f59e0b' : '#3a6060', fontFamily: 'JetBrains Mono', lineHeight: 1 }}>{mask(fmtUSD(totalBorrowedUSD))}</p>
+                <p style={{ fontSize: 8, color: totalBorrowedUSD > 0 ? '#f59e0baa' : '#2a5050', marginTop: 3 }}>{totalBorrowedUSD > 0 ? 'Outstanding' : '—'}</p>
+              </div>
             </div>
           </div>
 
           {/* Health factor */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14, borderRight: '1px solid #0d2424', paddingRight: 24, marginRight: 24, flexShrink: 0 }}>
-            <div>
-              <p style={{ fontSize: 9, color: '#4a7878', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>Health Factor</p>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-                <p style={{ fontSize: 18, fontWeight: 700, color: hfColor, fontFamily: 'JetBrains Mono', lineHeight: 1 }}>
-                  {healthFactor !== null ? healthFactor.toFixed(2) : '—'}
-                </p>
-                {healthFactor !== null && <span style={{ fontSize: 9, color: hfColor + 'aa' }}>{healthFactor >= 2 ? 'Safe' : healthFactor >= 1.2 ? 'Monitor' : 'At Risk'}</span>}
-              </div>
+          <div style={{ borderRight: '1px solid #0d2424', paddingRight: 24, marginRight: 24, flexShrink: 0 }}>
+            <p style={{ fontSize: 8, color: '#4a7878', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 5 }}>Health Factor</p>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 6 }}>
+              <p style={{ fontSize: 18, fontWeight: 700, color: hfColor, fontFamily: 'JetBrains Mono', lineHeight: 1 }}>
+                {healthFactor !== null ? healthFactor.toFixed(2) : '—'}
+              </p>
               {healthFactor !== null && (
-                <div style={{ marginTop: 5, height: 2, width: 80, background: '#0a1e1e', borderRadius: 1 }}>
-                  <div style={{ height: '100%', borderRadius: 1, width: `${Math.min(healthFactor/4,1)*100}%`, background: hfColor, boxShadow: `0 0 4px ${hfColor}60`, transition: 'width 0.5s' }} />
-                </div>
+                <span style={{ fontSize: 9, fontWeight: 600, color: hfColor, background: hfColor+'18', border: `1px solid ${hfColor}35`, borderRadius: 5, padding: '1px 6px' }}>
+                  {healthFactor >= 2 ? 'Safe' : healthFactor >= 1.2 ? 'Monitor' : 'At Risk'}
+                </span>
               )}
             </div>
+            {healthFactor !== null && (
+              <div style={{ position: 'relative', width: 110 }}>
+                <div style={{ height: 3, background: '#0a1e1e', borderRadius: 2 }}>
+                  <div style={{ height: '100%', borderRadius: 2, background: `linear-gradient(90deg, ${hfColor}70, ${hfColor})`, boxShadow: `0 0 5px ${hfColor}55`, transition: 'width 0.5s', width: `${Math.min(Math.max((healthFactor - 0.5) / 2.0, 0), 1) * 100}%` }} />
+                </div>
+                {/* Liquidation marker at 25% = HF 1.0 */}
+                <div style={{ position: 'absolute', top: -2, bottom: -2, left: '25%', width: 1, background: '#ef444455' }} />
+              </div>
+            )}
           </div>
 
           {/* Protocol TVL */}

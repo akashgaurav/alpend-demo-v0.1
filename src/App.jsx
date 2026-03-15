@@ -1247,23 +1247,6 @@ function MarketsScreen({ partyId, balance, onLogout, connected = true, onConnect
       </div>
 
       {/* ── Aave-style two-column layout ────────────────────────────────── */}
-      {/* Trust section */}
-      <div className="px-4 sm:px-8 md:px-14" style={{ borderBottom: '1px solid #0a2020', display: 'flex' }}>
-        {[
-          { label: 'Powered by',    name: 'Canton Network',  sub: 'L1 Privacy Blockchain',    icon: '/canton-icon.svg',    iconStyle: { height: 16, opacity: 0.9 } },
-          { label: 'Settlement via', name: 'Chainlink Oracle', sub: 'Tamper-proof price feeds', icon: '/chainlink-logo.svg', iconStyle: { height: 16, opacity: 0.85 } },
-        ].map((item, i) => (
-          <div key={i} style={{ padding: '18px 28px 18px 0', marginRight: 28, borderRight: i < 1 ? '1px solid #0a2020' : 'none', paddingRight: 28 }}>
-            <p style={{ fontSize: 8, color: '#3a6060', textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 6, fontFamily: 'JetBrains Mono' }}>{item.label}</p>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-              <img src={item.icon} alt={item.name} style={item.iconStyle} />
-              <p style={{ fontSize: 15, fontWeight: 600, color: '#c8e8e8', letterSpacing: '-0.01em' }}>{item.name}</p>
-            </div>
-            <p style={{ fontSize: 10, color: '#4a7878', fontFamily: 'JetBrains Mono' }}>{item.sub}</p>
-          </div>
-        ))}
-      </div>
-
       <main className="px-4 sm:px-8 md:px-14 pt-6 pb-8" style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignItems: 'start' }}>
 
         {/* ════ SUPPLY COLUMN ════ */}
@@ -1471,6 +1454,23 @@ function MarketsScreen({ partyId, balance, onLogout, connected = true, onConnect
           </div>
         </div>
       </main>
+
+      {/* Trust section */}
+      <div className="px-4 sm:px-8 md:px-14" style={{ borderTop: '1px solid #0a2020', display: 'flex' }}>
+        {[
+          { label: 'Powered by',    name: 'Canton Network',  sub: 'L1 Privacy Blockchain',    icon: '/canton-icon.svg',    iconStyle: { height: 16, opacity: 0.9 } },
+          { label: 'Settlement via', name: 'Chainlink Oracle', sub: 'Tamper-proof price feeds', icon: '/chainlink-logo.svg', iconStyle: { height: 16, opacity: 0.85 } },
+        ].map((item, i) => (
+          <div key={i} style={{ padding: '18px 28px 18px 0', marginRight: 28, borderRight: i < 1 ? '1px solid #0a2020' : 'none', paddingRight: 28 }}>
+            <p style={{ fontSize: 8, color: '#3a6060', textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 6, fontFamily: 'JetBrains Mono' }}>{item.label}</p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+              <img src={item.icon} alt={item.name} style={item.iconStyle} />
+              <p style={{ fontSize: 15, fontWeight: 600, color: '#c8e8e8', letterSpacing: '-0.01em' }}>{item.name}</p>
+            </div>
+            <p style={{ fontSize: 10, color: '#4a7878', fontFamily: 'JetBrains Mono' }}>{item.sub}</p>
+          </div>
+        ))}
+      </div>
 
       {/* ── Modal ───────────────────────────────────────────────────────── */}
       {modal && (

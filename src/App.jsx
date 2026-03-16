@@ -1176,7 +1176,7 @@ function MarketsScreen({ partyId, balance, onLogout, connected = true, onConnect
             <div style={{ padding: '18px 0' }}>
               <p style={{ fontSize: 8, color: '#4a7878', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 5 }}>Supplied</p>
               <p style={{ fontSize: 14, fontWeight: 700, color: '#14b8a6', fontFamily: 'IBM Plex Mono', lineHeight: 1 }}>{mask(fmtUSD(totalSuppliedUSD))}</p>
-              <p style={{ fontSize: 8, color: netAPY !== null ? '#14b8a6aa' : '#2a5050', marginTop: 3 }}>{netAPY !== null ? `${fmtPct(netAPY)} APY` : '—'}</p>
+              <p style={{ fontSize: 8, color: netAPY !== null ? '#14b8a6aa' : '#2a5050', marginTop: 3 }}>{netAPY !== null ? mask(`${fmtPct(netAPY)} APY`) : '—'}</p>
             </div>
           </div>
 
@@ -1185,7 +1185,7 @@ function MarketsScreen({ partyId, balance, onLogout, connected = true, onConnect
             <div style={{ padding: '18px 0' }}>
               <p style={{ fontSize: 8, color: '#4a7878', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 5 }}>Borrowed</p>
               <p style={{ fontSize: 14, fontWeight: 700, color: totalBorrowedUSD > 0 ? '#f59e0b' : '#3a6060', fontFamily: 'IBM Plex Mono', lineHeight: 1 }}>{mask(fmtUSD(totalBorrowedUSD))}</p>
-              <p style={{ fontSize: 8, color: totalBorrowedUSD > 0 ? '#f59e0baa' : '#2a5050', marginTop: 3 }}>{totalBorrowedUSD > 0 ? `${(Object.entries(positions.borrowed).reduce((s, [id, amt]) => { const a = MARKET_ASSETS.find(x => x.id === id); return s + (parseFloat(amt)||0) * a.price * a.borrowRate }, 0) / totalBorrowedUSD).toFixed(2)}% APR` : '—'}</p>
+              <p style={{ fontSize: 8, color: totalBorrowedUSD > 0 ? '#f59e0baa' : '#2a5050', marginTop: 3 }}>{totalBorrowedUSD > 0 ? mask(`${(Object.entries(positions.borrowed).reduce((s, [id, amt]) => { const a = MARKET_ASSETS.find(x => x.id === id); return s + (parseFloat(amt)||0) * a.price * a.borrowRate }, 0) / totalBorrowedUSD).toFixed(2)}% APR`) : '—'}</p>
             </div>
           </div>
 
@@ -1451,7 +1451,7 @@ function MarketsScreen({ partyId, balance, onLogout, connected = true, onConnect
                           <p style={{ fontSize: 12, color: '#8ecece', fontFamily: 'IBM Plex Mono' }}>{mask(fmtToken(yourLimitTokens, 2))} <span style={{ fontSize: 9, color: '#5a8888' }}>{asset.symbol}</span></p>
                           <p style={{ fontSize: 9, color: '#5a8888', marginTop: 2 }}>{mask(fmtUSD(yourLimitUSD))}</p>
                         </>
-                      : <p style={{ fontSize: 10, color: '#3a6060' }}>Supply first</p>
+                      : <p style={{ fontSize: 10, color: '#3a6060' }}>{masked ? '•••••' : 'Supply first'}</p>
                     }
                   </div>}
                   <button onClick={() => connected ? openModal('borrow', asset) : onConnect?.()}
@@ -1584,7 +1584,7 @@ function MarketsScreen({ partyId, balance, onLogout, connected = true, onConnect
                       <div className="modal-slider-track" />
                       <div className="modal-slider-fill" style={{ width: `${sliderPct}%` }} />
                       <input type="range" min="0" max="100" step="1" value={sliderPct}
-                        onChange={e => { const pct = parseInt(e.target.value); setModalAmount(pct === 100 ? String(avail.toFixed(6)) : String((avail * pct / 100).toFixed(6))) }}
+                        onChange={e => { const pct = parseInt(e.target.value); setModalAmount(pct === 0 ? '' : pct === 100 ? String(avail.toFixed(6)) : String((avail * pct / 100).toFixed(6))) }}
                         className="modal-slider" />
                     </div>
                   </div>
@@ -1991,7 +1991,7 @@ function AppRoutes() {
   }
 
   const handleEmail    = val => { setEmail(val); setSteps(s => ({ ...s, email: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val) })) }
-  const handleTwitter  = () => { window.open('https://x.com/AlpendMarket',  '_blank', 'noopener,noreferrer'); setSteps(s => ({ ...s, twitter:  true })) }
+  const handleTwitter  = () => { window.open('https://twitter.com/intent/follow?screen_name=AlpendMarket', '_blank', 'noopener,noreferrer'); setSteps(s => ({ ...s, twitter: true })) }
   const handleTelegram = () => { window.open('https://t.me/AlpendDesk',     '_blank', 'noopener,noreferrer'); setSteps(s => ({ ...s, telegram: true })) }
   const allComplete    = steps.email && steps.twitter && steps.telegram && steps.partyId
 

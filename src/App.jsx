@@ -1328,8 +1328,8 @@ function MarketsScreen({ partyId, balance, onLogout, connected = true, onConnect
                     </div>
                   </div>
                   <div>
-                    <p style={{ fontSize: 12, color: '#8ecece', fontFamily: 'IBM Plex Mono' }}>{fmtUSD(asset.totalSupplied * asset.price)}</p>
-                    <p style={{ fontSize: 9, color: '#5a8888', marginTop: 2 }}>{Math.round(util*100)}% utilized</p>
+                    <p style={{ fontSize: 12, color: '#8ecece', fontFamily: 'IBM Plex Mono' }}>{fmtToken(asset.totalSupplied, 2)} <span style={{ fontSize: 9, color: '#5a8888' }}>{asset.symbol}</span></p>
+                    <p style={{ fontSize: 9, color: '#5a8888', fontFamily: 'IBM Plex Mono', marginTop: 2 }}>{fmtUSD(asset.totalSupplied * asset.price)}</p>
                   </div>
                   <span style={{ fontSize: 14, fontWeight: 700, color: '#14b8a6', fontFamily: 'IBM Plex Mono' }}>{fmtPct(asset.supplyApy)}</span>
                   <span style={{ fontSize: 12, color: '#6aabab', fontFamily: 'IBM Plex Mono' }}>{asset.ltv}%</span>
@@ -1430,14 +1430,14 @@ function MarketsScreen({ partyId, balance, onLogout, connected = true, onConnect
                   </div>
                   <div>
                     <p style={{ fontSize: 12, color: '#8ecece', fontFamily: 'IBM Plex Mono' }}>{fmtToken(avail, 2)} <span style={{ fontSize: 9, color: '#5a8888' }}>{asset.symbol}</span></p>
-                    <p style={{ fontSize: 9, color: '#5a8888', marginTop: 3 }}>{fmtUSD(avail * asset.price)}</p>
+                    <p style={{ fontSize: 9, color: '#5a8888', fontFamily: 'IBM Plex Mono', marginTop: 2 }}>{fmtUSD(avail * asset.price)}</p>
                   </div>
                   <span style={{ fontSize: 14, fontWeight: 700, color: '#f59e0b', fontFamily: 'IBM Plex Mono' }}>{fmtPct(asset.borrowRate)}</span>
                   {connected && <div>
                     {yourLimitUSD > 0
                       ? <>
-                          <p style={{ fontSize: 12, color: '#8ecece', fontFamily: 'IBM Plex Mono' }}>{fmtToken(yourLimitTokens, 2)} <span style={{ fontSize: 9, color: '#5a8888' }}>{asset.symbol}</span></p>
-                          <p style={{ fontSize: 9, color: '#5a8888', marginTop: 2 }}>{fmtUSD(yourLimitUSD)}</p>
+                          <p style={{ fontSize: 12, color: '#8ecece', fontFamily: 'IBM Plex Mono' }}>{mask(fmtToken(yourLimitTokens, 2))} <span style={{ fontSize: 9, color: '#5a8888' }}>{asset.symbol}</span></p>
+                          <p style={{ fontSize: 9, color: '#5a8888', marginTop: 2 }}>{mask(fmtUSD(yourLimitUSD))}</p>
                         </>
                       : <p style={{ fontSize: 10, color: '#3a6060' }}>Supply first</p>
                     }
@@ -1458,8 +1458,8 @@ function MarketsScreen({ partyId, balance, onLogout, connected = true, onConnect
       {/* Trust section */}
       <div className="px-4 sm:px-8 md:px-14" style={{ borderTop: '1px solid #0a2020', display: 'flex' }}>
         {[
-          { label: 'Powered by',    name: 'Canton Network',  sub: 'L1 Privacy Blockchain',    icon: '/canton-icon.svg',    iconStyle: { height: 16, opacity: 0.9 } },
-          { label: 'Settlement via', name: 'Chainlink Oracle', sub: 'Tamper-proof price feeds', icon: '/chainlink-logo.svg', iconStyle: { height: 16, opacity: 0.85 } },
+          { label: 'Powered by',    name: 'Canton Network',  sub: 'Institutional-grade L1',  icon: '/canton-icon.svg',    iconStyle: { height: 16, opacity: 0.9 } },
+          { label: 'Settlement via', name: 'Chainlink Oracle', sub: 'Real-time price feeds',    icon: '/chainlink-logo.svg', iconStyle: { height: 16, opacity: 0.85 } },
         ].map((item, i) => (
           <div key={i} style={{ padding: '18px 28px 18px 0', marginRight: 28, borderRight: i < 1 ? '1px solid #0a2020' : 'none', paddingRight: 28 }}>
             <p style={{ fontSize: 8, color: '#3a6060', textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 6, fontFamily: 'IBM Plex Mono' }}>{item.label}</p>
@@ -1974,7 +1974,7 @@ function AppRoutes() {
       localStorage.setItem('alpend_partyId', DEMO_PARTY_ID)
       localStorage.setItem('alpend_balance', JSON.stringify(DEMO_BALANCE))
       setSteps(s => ({ ...s, partyId: true }))
-      nav('/whitelist')
+      nav('/waitlist')
     }, 2400)
   }
 
@@ -1985,7 +1985,7 @@ function AppRoutes() {
 
   const handleSubmit = () => {
     setSubmitting(true)
-    setTimeout(() => { nav('/submitted'); setSubmitting(false) }, 1800)
+    setTimeout(() => { nav('/waitlisted'); setSubmitting(false) }, 1800)
   }
 
   const handleLogout = () => {
@@ -2003,7 +2003,7 @@ function AppRoutes() {
       <Routes>
         <Route path="/"          element={<LandingScreen onJoin={handleJoin} />} />
         <Route path="/connect"   element={<ConnectingScreen />} />
-        <Route path="/whitelist" element={
+        <Route path="/waitlist" element={
           <WhitelistScreen
             partyId={partyId} email={email} steps={steps}
             submitting={submitting} allComplete={allComplete}
@@ -2012,7 +2012,7 @@ function AppRoutes() {
             onLogout={handleLogout}
           />
         } />
-        <Route path="/submitted" element={<SubmittedScreen email={email} partyId={partyId} onLogout={handleLogout} onEnterMarkets={() => nav('/markets')} />} />
+        <Route path="/waitlisted" element={<SubmittedScreen email={email} partyId={partyId} onLogout={handleLogout} onEnterMarkets={() => nav('/markets')} />} />
         <Route path="/markets"   element={<MarketsScreen partyId={partyId} balance={balance} onLogout={handleLogout} connected={true} />} />
         <Route path="/app"       element={<MarketsScreen partyId={null} balance={null} onLogout={null} connected={false} onConnect={() => nav('/')} />} />
         <Route path="/terms"     element={<TermsScreen />} />

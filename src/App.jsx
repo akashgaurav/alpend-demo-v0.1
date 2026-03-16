@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -488,6 +488,7 @@ function BgDots() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function LandingScreen({ onJoin }) {
+  useEffect(() => { document.title = 'Alpend — Get Early Access' }, [])
   return (
     <div className="min-h-screen flex flex-col" style={{ position: 'relative' }}>
       {/* Soft central bloom */}
@@ -599,6 +600,7 @@ function LandingScreen({ onJoin }) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function ConnectingScreen() {
+  useEffect(() => { document.title = 'Alpend — Connect Your Wallet' }, [])
   return (
     <div className="dot-bg min-h-screen flex flex-col">
       <Header />
@@ -651,6 +653,7 @@ function ConnectingScreen() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function WhitelistScreen({ partyId, email, steps, submitting, allComplete, onEmail, onTwitter, onTelegram, onSubmit, onLogout }) {
+  useEffect(() => { document.title = 'Alpend — Join the Waitlist' }, [])
   const [touched, setTouched] = useState(false)
   const emailError = touched && email.length > 0 && !steps.email
 
@@ -854,6 +857,7 @@ function WhitelistScreen({ partyId, email, steps, submitting, allComplete, onEma
 // ─────────────────────────────────────────────────────────────────────────────
 
 function SubmittedScreen({ email, partyId, onLogout, onEnterMarkets }) {
+  useEffect(() => { document.title = "Alpend — You're on the List" }, [])
   return (
     <div className="dot-bg min-h-screen flex flex-col">
       <Header partyId={partyId} onLogout={onLogout} />
@@ -1068,6 +1072,7 @@ function DonutRing({ pct, color, size = 36, stroke = 3 }) {
 }
 
 function MarketsScreen({ partyId, balance, onLogout, connected = true, onConnect }) {
+  useEffect(() => { document.title = 'Alpend — Dashboard' }, [])
   const [modal, setModal]           = useState(null)
   const [modalStep, setModalStep]   = useState(1)
   const [modalAmount, setModalAmount] = useState('')
@@ -1105,7 +1110,14 @@ function MarketsScreen({ partyId, balance, onLogout, connected = true, onConnect
 
   const getAvailable = (type, asset) => {
     if (type === 'supply')   return walletBal(asset)
-    if (type === 'borrow')   return asset.totalSupplied - asset.totalBorrowed
+    if (type === 'borrow') {
+      const collateralUSD = Object.entries(positions.supplied).reduce((s, [id, amt]) => {
+        const a = MARKET_ASSETS.find(x => x.id === id)
+        return s + (parseFloat(amt) || 0) * a.price * (a.ltv / 100)
+      }, 0)
+      const userLimitUSD = Math.max(0, collateralUSD - totalBorrowedUSD)
+      return userLimitUSD / asset.price
+    }
     if (type === 'withdraw') return parseFloat(positions.supplied[asset.id] || 0)
     if (type === 'repay')    return parseFloat(positions.borrowed[asset.id] || 0)
     return 0
@@ -1513,130 +1525,128 @@ function MarketsScreen({ partyId, balance, onLogout, connected = true, onConnect
             </div>
 
             {/* STEP 1 — Amount */}
-            {modalStep === 1 && (
-              <div style={{ padding: '0 26px 26px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', background: '#071818', border: '1px solid #0d2424', borderRadius: 10, padding: '12px 15px', marginBottom: 14 }}>
-                  <div>
-                    <p style={{ fontSize: 8, color: '#5a8888', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 3 }}>{modal.type === 'supply' || modal.type === 'withdraw' ? 'Supply APY' : 'Borrow Rate'}</p>
-                    <p style={{ fontSize: 16, fontWeight: 700, color: accent, fontFamily: 'IBM Plex Mono', lineHeight: 1 }}>{modal.type === 'supply' || modal.type === 'withdraw' ? fmtPct(modal.asset.supplyApy) : fmtPct(modal.asset.borrowRate)}</p>
+            {modalStep === 1 && (() => {
+              const avail = getAvailable(modal.type, modal.asset)
+              const curAmt = parseFloat(modalAmount) || 0
+              const sliderPct = avail > 0 ? Math.round(Math.min(curAmt / avail, 1) * 100) : 0
+              const isOverMax = avail > 0 && curAmt > avail
+              const isEmpty = curAmt <= 0
+              const canReview = !isEmpty && !isOverMax
+
+              const btnBg = isOverMax
+                ? 'linear-gradient(135deg, #ef4444 0%, #b91c1c 100%)'
+                : canReview
+                  ? `linear-gradient(135deg, ${accent} 0%, ${isBorrowSide ? '#d97706' : '#0d9488'} 100%)`
+                  : 'transparent'
+              const btnBorder = isEmpty ? `1px solid #1e4040` : 'none'
+              const btnColor = isOverMax || canReview ? '#071e1e' : '#4a7878'
+              const btnLabel = isEmpty
+                ? 'Enter an amount'
+                : isOverMax
+                  ? modal.type === 'repay' ? 'Cannot repay more than you owe' : modal.type === 'borrow' ? 'Exceeds borrow limit' : 'Exceeds available balance'
+                  : 'Review Transaction →'
+
+              // HF preview vars
+              const hfToBarPct = (hf) => hf === null ? 1 : Math.min(Math.log1p(hf) / Math.log1p(75), 1)
+              const displayHF    = curAmt > 0 ? previewHF : healthFactor
+              const displayColor = displayHF === null ? '#14b8a6' : displayHF >= 50 ? '#14b8a6' : displayHF >= 10 ? '#34d399' : displayHF >= 3 ? '#a3e635' : displayHF >= 1.5 ? '#f59e0b' : '#ef4444'
+              const displayLabel = displayHF === null ? 'Safe' : displayHF >= 50 ? 'Very Safe' : displayHF >= 10 ? 'Very Safe' : displayHF >= 3 ? 'Safe' : displayHF >= 1.5 ? 'Monitor' : 'At Risk'
+              const barPct       = hfToBarPct(displayHF)
+              const beforeHF     = healthFactor
+              const beforeColor  = beforeHF === null ? '#14b8a6' : beforeHF >= 50 ? '#14b8a6' : beforeHF >= 10 ? '#34d399' : beforeHF >= 3 ? '#a3e635' : beforeHF >= 1.5 ? '#f59e0b' : '#ef4444'
+              const beforePct    = hfToBarPct(beforeHF)
+              const showBefore   = curAmt > 0 && beforeHF !== displayHF
+
+              return (
+                <div style={{ padding: '0 26px 26px' }}>
+                  {/* Stats row */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', background: '#071818', border: '1px solid #0d2424', borderRadius: 10, padding: '12px 15px', marginBottom: 14 }}>
+                    <div>
+                      <p style={{ fontSize: 8, color: '#5a8888', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 3 }}>{modal.type === 'supply' || modal.type === 'withdraw' ? 'Supply APY' : 'Borrow Rate'}</p>
+                      <p style={{ fontSize: 16, fontWeight: 700, color: accent, fontFamily: 'IBM Plex Mono', lineHeight: 1 }}>{modal.type === 'supply' || modal.type === 'withdraw' ? fmtPct(modal.asset.supplyApy) : fmtPct(modal.asset.borrowRate)}</p>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <p style={{ fontSize: 8, color: '#5a8888', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 3 }}>Available</p>
+                      <p style={{ fontSize: 16, fontWeight: 700, color: '#fff', fontFamily: 'IBM Plex Mono', lineHeight: 1 }}>{fmtToken(avail, 4)}</p>
+                      <p style={{ fontSize: 8, color: '#5a8888', marginTop: 2 }}>{modal.asset.symbol}</p>
+                    </div>
                   </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <p style={{ fontSize: 8, color: '#5a8888', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 3 }}>Available</p>
-                    <p style={{ fontSize: 16, fontWeight: 700, color: '#fff', fontFamily: 'IBM Plex Mono', lineHeight: 1 }}>{fmtToken(getAvailable(modal.type, modal.asset), 4)}</p>
-                    <p style={{ fontSize: 8, color: '#5a8888', marginTop: 2 }}>{modal.asset.symbol}</p>
+
+                  {/* Slider — above input */}
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                      <span style={{ fontSize: 9, color: '#4a7878' }}>0%</span>
+                      <span style={{ fontSize: 9, fontWeight: 600, color: accent, fontFamily: 'IBM Plex Mono' }}>{sliderPct}%</span>
+                      <span onClick={() => setModalAmount(String(avail.toFixed(6)))}
+                        style={{ fontSize: 9, fontWeight: 600, color: accent, cursor: 'pointer', textDecoration: 'underline', textDecorationStyle: 'dotted', textUnderlineOffset: 2 }}>Max</span>
+                    </div>
+                    <div className="modal-slider-wrap">
+                      <div className="modal-slider-track" />
+                      <div className="modal-slider-fill" style={{ width: `${sliderPct}%` }} />
+                      <input type="range" min="0" max="100" step="1" value={sliderPct}
+                        onChange={e => { const pct = parseInt(e.target.value); setModalAmount(pct === 100 ? String(avail.toFixed(6)) : String((avail * pct / 100).toFixed(6))) }}
+                        className="modal-slider" />
+                    </div>
                   </div>
+
+                  {/* Input */}
+                  <div style={{ position: 'relative', marginBottom: 8 }}>
+                    <input type="number" placeholder="0.00" value={modalAmount} onChange={e => setModalAmount(e.target.value)} autoFocus
+                      style={{ width: '100%', background: '#071a1a', border: `1px solid ${isOverMax ? '#ef444460' : '#163030'}`, borderRadius: 12, padding: '15px 80px 15px 15px', fontSize: 22, color: '#fff', outline: 'none', fontFamily: 'IBM Plex Mono, monospace', boxSizing: 'border-box' }}
+                      onFocus={e => e.target.style.borderColor = isOverMax ? '#ef444480' : '#1e5050'}
+                      onBlur={e => e.target.style.borderColor = isOverMax ? '#ef444460' : '#163030'} />
+                    <div style={{ position: 'absolute', right: 13, top: '50%', transform: 'translateY(-50%)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <div style={{ width: 16, height: 16, borderRadius: 4, background: modal.asset.color+'20', border: `1px solid ${modal.asset.color}30`, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                        <img src={modal.asset.icon} alt={modal.asset.symbol} style={{ width: 11, height: 11, objectFit: 'contain' }} />
+                      </div>
+                      <span style={{ fontSize: 11, color: '#5a8e8e', fontWeight: 600 }}>{modal.asset.symbol}</span>
+                    </div>
+                  </div>
+                  <p style={{ fontSize: 10, color: '#5a8888', fontFamily: 'IBM Plex Mono', marginBottom: isOverMax ? 6 : 12 }}>≈ {fmtUSD(curAmt * modal.asset.price)}</p>
+
+                  {/* Over-max warning */}
+                  {isOverMax && (
+                    <div style={{ background: '#ef444412', border: '1px solid #ef444430', borderRadius: 8, padding: '8px 12px', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 7 }}>
+                      <span style={{ fontSize: 13, lineHeight: 1 }}>⚠</span>
+                      <p style={{ fontSize: 10, color: '#f87171', lineHeight: 1.5 }}>
+                        {modal.type === 'borrow'
+                          ? `Amount exceeds your borrow limit of ${fmtToken(avail, 4)} ${modal.asset.symbol}`
+                          : modal.type === 'repay'
+                            ? `You only owe ${fmtToken(avail, 4)} ${modal.asset.symbol} — you can't repay more than your outstanding debt`
+                            : `Amount exceeds available balance of ${fmtToken(avail, 4)} ${modal.asset.symbol}`}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* HF preview */}
+                  <div style={{ background: '#071818', border: `1px solid ${displayColor}28`, borderRadius: 10, padding: '14px 16px', marginBottom: 18 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                      <span style={{ fontSize: 10, color: '#5a8888', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Health Factor</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                        {showBefore && <span style={{ fontSize: 12, fontFamily: 'IBM Plex Mono', color: beforeColor, opacity: 0.45 }}>{beforeHF === null ? '∞' : beforeHF.toFixed(2)}</span>}
+                        {showBefore && <span style={{ fontSize: 9, color: '#3a5a5a' }}>→</span>}
+                        <span style={{ fontSize: 17, fontWeight: 700, fontFamily: 'IBM Plex Mono', color: displayColor }}>{displayHF === null ? '∞' : displayHF.toFixed(2)}</span>
+                        <span style={{ fontSize: 9, fontWeight: 600, color: displayColor, background: displayColor+'18', border: `1px solid ${displayColor}35`, borderRadius: 5, padding: '2px 7px' }}>{displayLabel}</span>
+                      </div>
+                    </div>
+                    <div style={{ position: 'relative', height: 7, background: '#0a1e1e', borderRadius: 4 }}>
+                      {showBefore && <div style={{ position: 'absolute', top: 0, left: 0, height: '100%', borderRadius: 4, width: `${beforePct*100}%`, background: beforeColor+'30', transition: 'width 0.4s' }} />}
+                      <div style={{ position: 'absolute', top: 0, left: 0, height: '100%', borderRadius: 4, width: `${barPct*100}%`, background: `linear-gradient(90deg, ${displayColor}70, ${displayColor})`, boxShadow: `0 0 8px ${displayColor}55`, transition: 'width 0.4s, background 0.4s' }} />
+                      <div style={{ position: 'absolute', top: -3, bottom: -3, left: `${Math.log1p(1) / Math.log1p(75) * 100}%`, width: 1.5, background: '#ef444460' }} />
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 7 }}>
+                      <span style={{ fontSize: 8, color: '#ef444470' }}>← Liquidation at 1.0</span>
+                      <span style={{ fontSize: 8, color: '#14b8a650' }}>Safe ≥ 2.0 →</span>
+                    </div>
+                  </div>
+
+                  <button onClick={() => canReview && setModalStep(2)}
+                    style={{ width: '100%', padding: '14px', borderRadius: 12, fontSize: 13, fontWeight: 700, background: btnBg, border: btnBorder, color: btnColor, cursor: canReview ? 'pointer' : 'default', transition: 'all 0.2s', letterSpacing: '-0.01em' }}>
+                    {btnLabel}
+                  </button>
                 </div>
-
-                {/* Input */}
-                <div style={{ position: 'relative', marginBottom: 8 }}>
-                  <input type="number" placeholder="0.00" value={modalAmount} onChange={e => setModalAmount(e.target.value)} autoFocus
-                    style={{ width: '100%', background: '#071a1a', border: '1px solid #163030', borderRadius: 12, padding: '15px 80px 15px 15px', fontSize: 22, color: '#fff', outline: 'none', fontFamily: 'IBM Plex Mono, monospace', boxSizing: 'border-box' }}
-                    onFocus={e => e.target.style.borderColor='#1e5050'} onBlur={e => e.target.style.borderColor='#163030'} />
-                  <div style={{ position: 'absolute', right: 13, top: '50%', transform: 'translateY(-50%)', display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <div style={{ width: 16, height: 16, borderRadius: 4, background: modal.asset.color+'20', border: `1px solid ${modal.asset.color}30`, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-                      <img src={modal.asset.icon} alt={modal.asset.symbol} style={{ width: 11, height: 11, objectFit: 'contain' }} />
-                    </div>
-                    <span style={{ fontSize: 11, color: '#5a8e8e', fontWeight: 600 }}>{modal.asset.symbol}</span>
-                  </div>
-                </div>
-                <p style={{ fontSize: 10, color: '#5a8888', fontFamily: 'IBM Plex Mono', marginBottom: 12 }}>≈ {fmtUSD((parseFloat(modalAmount)||0) * modal.asset.price)}</p>
-
-                {/* Pct slider */}
-                {(() => {
-                  const isBorrow = modal.type === 'borrow'
-                  const avail = getAvailable(modal.type, modal.asset)
-
-                  // For borrow: cap slider at the amount that brings HF to exactly 1.0
-                  const collateralUSD = Object.entries(positions.supplied).reduce((s, [id, amt]) => {
-                    const a = MARKET_ASSETS.find(x => x.id === id)
-                    return s + (parseFloat(amt) || 0) * a.price * (a.ltv / 100)
-                  }, 0)
-                  const maxSafeBorrowUSD = Math.max(collateralUSD - totalBorrowedUSD, 0)
-                  const maxSafeBorrowTokens = maxSafeBorrowUSD / modal.asset.price
-                  const sliderMax = isBorrow ? Math.min(maxSafeBorrowTokens, avail) : avail
-
-                  const curAmt = parseFloat(modalAmount) || 0
-                  const sliderPct = sliderMax > 0 ? Math.round(Math.min(curAmt / sliderMax, 1) * 100) : 0
-
-                  const leftLabel  = isBorrow ? 'HF ∞' : '0%'
-                  const rightLabel = isBorrow ? 'HF 1.0' : 'Max'
-
-                  return (
-                    <div style={{ marginBottom: 16 }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                        <span style={{ fontSize: 9, color: '#4a7878' }}>{leftLabel}</span>
-                        <span style={{ fontSize: 9, fontWeight: 600, color: accent, fontFamily: 'IBM Plex Mono' }}>{sliderPct}%</span>
-                        <span style={{ fontSize: 9, color: isBorrow && sliderPct >= 95 ? '#ef4444' : '#4a7878' }}>{rightLabel}</span>
-                      </div>
-                      <div className="modal-slider-wrap">
-                        <div className="modal-slider-track" />
-                        <div className="modal-slider-fill" style={{ width: `${sliderPct}%` }} />
-                        <input type="range" min="0" max="100" step="1" value={sliderPct}
-                          onChange={e => setModalAmount(String((sliderMax * parseInt(e.target.value) / 100).toFixed(6)))}
-                          className="modal-slider" />
-                      </div>
-                    </div>
-                  )
-                })()}
-
-                {/* HF preview */}
-                {(() => {
-                  // Scale: bar spans 0.5 → 2.5 (meaningful range)
-                  // HF < 1.0 = liquidation zone, HF ≥ 2.0 = safe zone
-                  const hfToBarPct = (hf) => hf === null
-                    ? 1                                              // no borrows = full safe bar
-                    : Math.min(Math.log1p(hf) / Math.log1p(75), 1) // log scale: HF 1→16%, 2→22%, 10→57%, 71→99%
-                  const displayHF   = parseFloat(modalAmount) > 0 ? previewHF : healthFactor
-                  const displayColor = displayHF === null ? '#14b8a6' : displayHF >= 50 ? '#14b8a6' : displayHF >= 10 ? '#34d399' : displayHF >= 3 ? '#a3e635' : displayHF >= 1.5 ? '#f59e0b' : '#ef4444'
-                  const displayLabel = displayHF === null ? 'Safe' : displayHF >= 50 ? 'Very Safe' : displayHF >= 10 ? 'Very Safe' : displayHF >= 3 ? 'Safe' : displayHF >= 1.5 ? 'Monitor' : 'At Risk'
-                  const barPct      = hfToBarPct(displayHF)
-                  // "before" bar shown as ghost when typing
-                  const beforeHF    = healthFactor
-                  const beforeColor = beforeHF === null ? '#14b8a6' : beforeHF >= 50 ? '#14b8a6' : beforeHF >= 10 ? '#34d399' : beforeHF >= 3 ? '#a3e635' : beforeHF >= 1.5 ? '#f59e0b' : '#ef4444'
-                  const beforePct   = hfToBarPct(beforeHF)
-                  const showBefore  = parseFloat(modalAmount) > 0 && beforeHF !== displayHF
-                  return (
-                    <div style={{ background: '#071818', border: `1px solid ${displayColor}28`, borderRadius: 10, padding: '14px 16px', marginBottom: 18 }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                        <span style={{ fontSize: 10, color: '#5a8888', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Health Factor</span>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                          {showBefore && (
-                            <span style={{ fontSize: 12, fontFamily: 'IBM Plex Mono', color: beforeColor, opacity: 0.45 }}>
-                              {beforeHF === null ? '∞' : beforeHF.toFixed(2)}
-                            </span>
-                          )}
-                          {showBefore && <span style={{ fontSize: 9, color: '#3a5a5a' }}>→</span>}
-                          <span style={{ fontSize: 17, fontWeight: 700, fontFamily: 'IBM Plex Mono', color: displayColor }}>
-                            {displayHF === null ? '∞' : displayHF.toFixed(2)}
-                          </span>
-                          <span style={{ fontSize: 9, fontWeight: 600, color: displayColor, background: displayColor+'18', border: `1px solid ${displayColor}35`, borderRadius: 5, padding: '2px 7px' }}>{displayLabel}</span>
-                        </div>
-                      </div>
-                      {/* Bar track */}
-                      <div style={{ position: 'relative', height: 7, background: '#0a1e1e', borderRadius: 4 }}>
-                        {/* Ghost "before" bar */}
-                        {showBefore && (
-                          <div style={{ position: 'absolute', top: 0, left: 0, height: '100%', borderRadius: 4, width: `${beforePct*100}%`, background: beforeColor+'30', transition: 'width 0.4s' }} />
-                        )}
-                        {/* Current bar */}
-                        <div style={{ position: 'absolute', top: 0, left: 0, height: '100%', borderRadius: 4, width: `${barPct*100}%`, background: `linear-gradient(90deg, ${displayColor}70, ${displayColor})`, boxShadow: `0 0 8px ${displayColor}55`, transition: 'width 0.4s, background 0.4s' }} />
-                        {/* Liquidation marker at log-scale position of HF 1.0 ≈ 16% */}
-                        <div style={{ position: 'absolute', top: -3, bottom: -3, left: `${Math.log1p(1) / Math.log1p(75) * 100}%`, width: 1.5, background: '#ef444460' }} />
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 7 }}>
-                        <span style={{ fontSize: 8, color: '#ef444470' }}>← Liquidation at 1.0</span>
-                        <span style={{ fontSize: 8, color: '#14b8a650' }}>Safe ≥ 2.0 →</span>
-                      </div>
-                    </div>
-                  )
-                })()}
-
-                <button onClick={() => parseFloat(modalAmount) > 0 && setModalStep(2)}
-                  style={{ width: '100%', padding: '14px', borderRadius: 12, fontSize: 13, fontWeight: 700, background: parseFloat(modalAmount) > 0 ? `linear-gradient(135deg, ${accent} 0%, ${isBorrowSide ? '#d97706' : '#0d9488'} 100%)` : '#0d2424', border: 'none', color: parseFloat(modalAmount) > 0 ? '#071e1e' : '#2a5050', cursor: parseFloat(modalAmount) > 0 ? 'pointer' : 'default', transition: 'all 0.2s', letterSpacing: '-0.01em' }}>
-                  Review Transaction →
-                </button>
-              </div>
-            )}
+              )
+            })()}
 
             {/* STEP 2 — Review */}
             {modalStep === 2 && (
@@ -1747,6 +1757,7 @@ function LegalLayout({ title, children }) {
 }
 
 function TermsScreen() {
+  useEffect(() => { document.title = 'Alpend — Terms of Use' }, [])
   return (
     <LegalLayout title="Terms of Use">
       <p>These Alpend Terms and Conditions ("Terms of Use", "Terms") are entered into between Moonshot Investment Corp (#1, Advanced Tower, Panama City, Panama) (referred to as "Company", "we", "our" and "us") and you or the company or other legal entity that you represent ("you" or "your").</p>
@@ -1846,6 +1857,7 @@ function TermsScreen() {
 }
 
 function PrivacyScreen() {
+  useEffect(() => { document.title = 'Alpend — Privacy Policy' }, [])
   return (
     <LegalLayout title="Privacy Policy">
       <p>This Privacy Policy describes the policies and procedures of Alpend ("we," "our," or "us") pertaining to the collection, use, and disclosure of your information on https://alpend.com/ and related applications and products we offer (the "Services" or "Alpend").</p>

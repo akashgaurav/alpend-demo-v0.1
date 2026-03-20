@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import { BrowserRouter, Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom'
+import { useState, useEffect, useMemo } from 'react'
+import { BrowserRouter, Routes, Route, Link, useNavigate, useLocation, useParams } from 'react-router-dom'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ICONS
@@ -208,7 +208,7 @@ function Header({ partyId, onLogout, onConnect }) {
   return (
     <header
       className="fixed top-0 left-0 right-0 z-30 flex items-center justify-between px-4 sm:px-8 md:px-14"
-      style={{ height: 56 }}
+      style={{ height: 56, background: '#071e1e', borderBottom: '1px solid #0d2424' }}
     >
       <a href="https://alpend.com" target="_blank" rel="noopener noreferrer" style={{ display: 'flex', alignItems: 'center' }}>
         <AlpendLogo className="h-[22px] w-auto" />
@@ -932,10 +932,25 @@ function SubmittedScreen({ email, partyId, onLogout, onEnterMarkets }) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const MARKET_ASSETS = [
-  { id: 'cbtc',  name: 'BitSafe BTC',       symbol: 'CBTC',  icon: '/cbtc.webp', color: '#f7931a', supplyApy: 1.24, borrowRate: 3.82, price: 95420,  ltv: 70, totalSupplied: 145.8,   totalBorrowed: 99.1,    walletKey: 'cbtc'  },
-  { id: 'usdcx', name: 'Circle Stablecoin', symbol: 'USDCx', icon: '/usdc.svg',         color: '#2775ca', supplyApy: 4.85, borrowRate: 6.20, price: 1.00,   ltv: 80, totalSupplied: 8500000, totalBorrowed: 6120000, walletKey: 'usdcx' },
-  { id: 'cc',    name: 'Canton Coin',       symbol: 'CC',    icon: '/cccoin.svg',       color: '#14b8a6', supplyApy: 2.10, borrowRate: 5.50, price: 0.85,   ltv: 60, totalSupplied: 1200000, totalBorrowed: 660000,  walletKey: 'cc'    },
+  { id: 'cbtc',  name: 'BitSafe BTC',       symbol: 'CBTC',  icon: '/cbtc.webp',   color: '#f7931a', supplyApy: 1.24, borrowRate: 3.82, price: 95420,  ltv: 70, liquidationThreshold: 75, liquidationPenalty: 7.5,  reserveFactor: 10, borrowCap: 200,      oracle: 'Chainlink BTC/USD',  totalSupplied: 145.8,   totalBorrowed: 99.1,    walletKey: 'cbtc'  },
+  { id: 'usdcx', name: 'Circle Stablecoin', symbol: 'USDCx', icon: '/usdc.svg',    color: '#2775ca', supplyApy: 4.85, borrowRate: 6.20, price: 1.00,   ltv: 80, liquidationThreshold: 85, liquidationPenalty: 4.5,  reserveFactor: 10, borrowCap: 15000000, oracle: 'Chainlink USDC/USD', totalSupplied: 8500000, totalBorrowed: 6120000, walletKey: 'usdcx' },
+  { id: 'cc',    name: 'Canton Coin',       symbol: 'CC',    icon: '/cccoin.svg',  color: '#14b8a6', supplyApy: 2.10, borrowRate: 5.50, price: 0.85,   ltv: 60, liquidationThreshold: 65, liquidationPenalty: 10.0, reserveFactor: 20, borrowCap: 3000000,  oracle: 'Chainlink CC/USD',   totalSupplied: 1200000, totalBorrowed: 660000,  walletKey: 'cc'    },
 ]
+
+// ── Health factor colour + label — single source of truth ──────────────────
+function hfColor(hf) {
+  if (hf === null || hf >= 99) return '#14b8a6'  // no borrows
+  if (hf >= 3)   return '#84cc16'                // safe
+  if (hf >= 1.5) return '#f59e0b'                // monitor
+  return '#ef4444'                               // at risk
+}
+function hfLabel(hf) {
+  if (hf === null || hf >= 99) return 'Safe'
+  if (hf >= 3)   return 'Safe'
+  if (hf >= 1.5) return 'Monitor'
+  return 'At Risk'
+}
+// ───────────────────────────────────────────────────────────────────────────
 
 function fmtUSD(n) {
   if (!n && n !== 0) return '—'
@@ -1010,50 +1025,52 @@ function IconEye({ open = true, size = 14, color = '#4a7878' }) {
   )
 }
 
-function ArcGauge({ value, max = 4 }) {
-  const pct  = Math.min(Math.max(value / max, 0), 1)
-  const r    = 52, cx = 72, cy = 68
-  const arcLen = Math.PI * r
-  const offset = arcLen * (1 - pct)
-  const color  = value >= 2 ? '#14b8a6' : value >= 1.2 ? '#f59e0b' : '#ef4444'
-  const θ  = Math.PI * (1 - pct)
-  const nx = cx + r * Math.cos(θ)
-  const ny = cy - r * Math.sin(θ)
+// Horizontal health factor bar — non-linear scale (0→3 = first 50%, 3→∞ = second 50%)
+function HealthBar({ value }) {
+  const hf    = value >= 99 ? Infinity : value
+  const pct   = hf === Infinity ? 1 : hf <= 3 ? hf / 6 : 1 - 1.5 / hf
+  const fill  = Math.min(Math.max(pct, 0), 1) * 100
+  const color = hfColor(hf === Infinity ? null : hf)
+  const label = hfLabel(hf === Infinity ? null : hf)
+  // Position of liquidation (HF=1) and safe (HF=3) markers on the bar
+  const liqPct  = (1 / 6) * 100   // HF=1 → 16.7%
+  const safePct = 50               // HF=3 → 50%
   return (
-    <svg width="144" height="84" viewBox="0 0 144 84">
-      {[0.25, 0.5, 0.75].map((p, i) => {
-        const a = Math.PI * (1 - p)
-        return <line key={i}
-          x1={cx + (r - 7) * Math.cos(a)} y1={cy - (r - 7) * Math.sin(a)}
-          x2={cx + (r + 3) * Math.cos(a)} y2={cy - (r + 3) * Math.sin(a)}
-          stroke="#1a3838" strokeWidth="1.5" />
-      })}
-      {/* Track */}
-      <path d={`M ${cx-r},${cy} A ${r},${r} 0 0,0 ${cx+r},${cy}`}
-        fill="none" stroke="#0d2020" strokeWidth="9" strokeLinecap="round"/>
-      {/* Danger zone tint */}
-      <path d={`M ${cx-r},${cy} A ${r},${r} 0 0,0 ${cx + r * Math.cos(Math.PI * 0.75)},${cy - r * Math.sin(Math.PI * 0.75)}`}
-        fill="none" stroke="#ef444418" strokeWidth="9" strokeLinecap="round"/>
-      {/* Progress */}
-      <path d={`M ${cx-r},${cy} A ${r},${r} 0 0,0 ${cx+r},${cy}`}
-        fill="none" stroke={color} strokeWidth="9" strokeLinecap="round"
-        strokeDasharray={`${arcLen} ${arcLen}`} strokeDashoffset={offset}
-        style={{ transition: 'stroke-dashoffset 0.7s cubic-bezier(0.33,1,0.68,1), stroke 0.3s', filter: `drop-shadow(0 0 5px ${color}60)` }}
-      />
-      {/* Needle */}
-      <circle cx={nx} cy={ny} r={4} fill={color}
-        style={{ filter: `drop-shadow(0 0 5px ${color})`, transition: 'all 0.7s cubic-bezier(0.33,1,0.68,1)' }}/>
-      {/* Value */}
-      <text x={cx} y={cy - 6} textAnchor="middle"
-        fill={color} fontSize="20" fontWeight="700" fontFamily="IBM Plex Mono, monospace"
-        style={{ transition: 'fill 0.3s' }}>
-        {value >= 99 ? '∞' : value.toFixed(2)}
-      </text>
-      <text x={cx} y={cy + 10} textAnchor="middle"
-        fill="#2a5050" fontSize="9" fontFamily="Inter, sans-serif" letterSpacing="0.1em">
-        {value >= 2 ? 'SAFE' : value >= 1.2 ? 'MONITOR' : 'AT RISK'}
-      </text>
-    </svg>
+    <div>
+      {/* Header row: value + badge */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+        <p style={{ fontSize: 9, fontWeight: 600, color: '#6b9090', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Health Factor</p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 22, fontWeight: 700, color, fontFamily: 'IBM Plex Mono', lineHeight: 1, transition: 'color 0.3s' }}>
+            {hf === Infinity ? '∞' : hf.toFixed(2)}
+          </span>
+          <span style={{ fontSize: 10, fontWeight: 600, color, background: color + '18', border: `1px solid ${color}40`, borderRadius: 6, padding: '3px 8px', transition: 'all 0.3s' }}>
+            {label}
+          </span>
+        </div>
+      </div>
+
+      {/* Bar track */}
+      <div style={{ position: 'relative', height: 10, borderRadius: 6, background: 'linear-gradient(90deg, #ef4444 0%, #f59e0b 17%, #84cc16 50%, #14b8a6 100%)', overflow: 'hidden', marginBottom: 10 }}>
+        {/* Dark mask revealing only the filled portion */}
+        <div style={{
+          position: 'absolute', right: 0, top: 0, bottom: 0,
+          width: `${100 - fill}%`,
+          background: '#0a1818',
+          transition: 'width 0.7s cubic-bezier(0.33,1,0.68,1)',
+        }} />
+        {/* Liquidation tick at HF=1 */}
+        <div style={{ position: 'absolute', left: `${liqPct}%`, top: -3, bottom: -3, width: 2, background: '#ef4444aa', borderRadius: 1 }} />
+        {/* Safe tick at HF=3 */}
+        <div style={{ position: 'absolute', left: `${safePct}%`, top: -3, bottom: -3, width: 1, background: '#2a5050', borderRadius: 1 }} />
+      </div>
+
+      {/* Labels below bar */}
+      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+        <span style={{ fontSize: 9, color: '#ef444488' }}>← Liquidation at 1.0</span>
+        <span style={{ fontSize: 9, color: '#3a6060' }}>Safe ≥ 3.0 →</span>
+      </div>
+    </div>
   )
 }
 
@@ -1071,42 +1088,25 @@ function DonutRing({ pct, color, size = 36, stroke = 3 }) {
   )
 }
 
-function MarketsScreen({ partyId, balance, onLogout, connected = true, onConnect }) {
-  useEffect(() => { document.title = 'Alpend — Dashboard' }, [])
-  const [modal, setModal]           = useState(null)
-  const [modalStep, setModalStep]   = useState(1)
-  const [modalAmount, setModalAmount] = useState('')
-  const [masked, setMasked]         = useState(false)
+// ─────────────────────────────────────────────────────────────────────────────
+// ACTION MODAL — shared between MarketsScreen and AssetDetailScreen
+// ─────────────────────────────────────────────────────────────────────────────
 
-  const [positions, setPositions]   = useState({ supplied: {}, borrowed: {} })
+function ActionModal({ modal, onClose, positions, setPositions, balance }) {
+  const [modalStep, setModalStep]     = useState(1)
+  const [modalAmount, setModalAmount] = useState('')
 
   const walletBal    = (asset) => parseFloat(balance?.[asset.walletKey] || 0)
-  const card         = (extra = {}) => ({ background: 'linear-gradient(160deg, #0d2a2a 0%, #091e1e 100%)', border: '1px solid #112828', borderRadius: 16, overflow: 'hidden', ...extra })
-  const isBorrowSide = modal && (modal.type === 'borrow' || modal.type === 'repay')
+  const isBorrowSide = modal.type === 'borrow' || modal.type === 'repay'
   const accent       = isBorrowSide ? '#f59e0b' : '#14b8a6'
 
-  const totalSuppliedUSD = Object.entries(positions.supplied).reduce((s, [id, amt]) => {
-    const a = MARKET_ASSETS.find(x => x.id === id); return s + (parseFloat(amt) || 0) * a.price }, 0)
   const totalBorrowedUSD = Object.entries(positions.borrowed).reduce((s, [id, amt]) => {
     const a = MARKET_ASSETS.find(x => x.id === id); return s + (parseFloat(amt) || 0) * a.price }, 0)
-  const netWorth     = totalSuppliedUSD - totalBorrowedUSD
   const healthFactor = totalBorrowedUSD > 0
     ? Object.entries(positions.supplied).reduce((s, [id, amt]) => {
         const a = MARKET_ASSETS.find(x => x.id === id)
         return s + (parseFloat(amt) || 0) * a.price * (a.ltv / 100) }, 0) / totalBorrowedUSD
     : null
-  const hfColor  = healthFactor === null ? '#14b8a6' : healthFactor >= 50 ? '#14b8a6' : healthFactor >= 10 ? '#34d399' : healthFactor >= 3 ? '#a3e635' : healthFactor >= 1.5 ? '#f59e0b' : '#ef4444'
-  const totalTVL = MARKET_ASSETS.reduce((s, a) => s + a.totalSupplied * a.price, 0)
-  const totalBorrowedProtocol = MARKET_ASSETS.reduce((s, a) => s + a.totalBorrowed * a.price, 0)
-  const netAPY   = totalSuppliedUSD > 0
-    ? Object.entries(positions.supplied).reduce((s, [id, amt]) => {
-        const a = MARKET_ASSETS.find(x => x.id === id)
-        return s + (parseFloat(amt) || 0) * a.price * a.supplyApy }, 0) / totalSuppliedUSD
-    : null
-  const hasPositions = totalSuppliedUSD > 0 || totalBorrowedUSD > 0
-
-  const openModal  = (type, asset) => { setModal({ type, asset }); setModalAmount(''); setModalStep(1) }
-  const closeModal = () => { setModal(null); setModalAmount(''); setModalStep(1) }
 
   const getAvailable = (type, asset) => {
     if (type === 'supply')   return walletBal(asset)
@@ -1115,11 +1115,21 @@ function MarketsScreen({ partyId, balance, onLogout, connected = true, onConnect
         const a = MARKET_ASSETS.find(x => x.id === id)
         return s + (parseFloat(amt) || 0) * a.price * (a.ltv / 100)
       }, 0)
-      const userLimitUSD = Math.max(0, collateralUSD - totalBorrowedUSD)
-      return userLimitUSD / asset.price
+      return Math.max(0, collateralUSD - totalBorrowedUSD) / asset.price
     }
-    if (type === 'withdraw') return parseFloat(positions.supplied[asset.id] || 0)
-    if (type === 'repay')    return parseFloat(positions.borrowed[asset.id] || 0)
+    if (type === 'withdraw') {
+      const supplied = parseFloat(positions.supplied[asset.id] || 0)
+      if (totalBorrowedUSD === 0) return supplied
+      const currentCollateral = Object.entries(positions.supplied).reduce((s, [id, amt]) => {
+        const a = MARKET_ASSETS.find(x => x.id === id)
+        return s + (parseFloat(amt) || 0) * a.price * (a.ltv / 100)
+      }, 0)
+      const assetContribPerToken = asset.price * (asset.ltv / 100)
+      const maxWithdrawUSD = Math.max(0, currentCollateral - totalBorrowedUSD)
+      const maxWithdrawTokens = assetContribPerToken > 0 ? maxWithdrawUSD / assetContribPerToken : 0
+      return Math.min(supplied, maxWithdrawTokens)
+    }
+    if (type === 'repay') return parseFloat(positions.borrowed[asset.id] || 0)
     return 0
   }
 
@@ -1135,12 +1145,11 @@ function MarketsScreen({ partyId, balance, onLogout, connected = true, onConnect
       if (type === 'repay')    { const r = parseFloat(prev.borrowed[asset.id] || 0) - amt; if (r <= 0) delete next.borrowed[asset.id]; else next.borrowed[asset.id] = String(r.toFixed(6)) }
       return next
     })
-    closeModal()
+    onClose()
   }
 
-  // Live health factor preview while typing amount
   const previewHF = (() => {
-    if (!modal || !parseFloat(modalAmount)) return healthFactor
+    if (!parseFloat(modalAmount)) return healthFactor
     const amt = parseFloat(modalAmount)
     const { type, asset } = modal
     let ns = { ...positions.supplied }, nb = { ...positions.borrowed }
@@ -1153,6 +1162,833 @@ function MarketsScreen({ partyId, balance, onLogout, connected = true, onConnect
     const col  = Object.entries(ns).reduce((s, [id, a]) => { const x = MARKET_ASSETS.find(m => m.id === id); return s + (parseFloat(a) || 0) * x.price * (x.ltv / 100) }, 0)
     return col / bUSD
   })()
+
+  const avail      = getAvailable(modal.type, modal.asset)
+  const curAmt     = parseFloat(modalAmount) || 0
+  const sliderPct  = avail > 0 ? Math.round(Math.min(curAmt / avail, 1) * 100) : 0
+  const isOverMax  = avail > 0 && curAmt > avail
+  const isEmpty    = curAmt <= 0
+  const canReview  = !isEmpty && !isOverMax
+  const noCollateral = modal.type === 'borrow' && avail === 0
+
+  const isWithdrawHfLimited = modal.type === 'withdraw' && totalBorrowedUSD > 0 && (() => {
+    const fullSupplied = parseFloat(positions.supplied[modal.asset.id] || 0)
+    return avail < fullSupplied
+  })()
+
+  // Non-linear scale: 0→3 = first 50%, 3→∞ = second 50% (asymptotic)
+  const hfToBarPct   = (hf) => hf === null ? 1 : hf <= 3 ? hf / 6 : 1 - 1.5 / hf
+  const displayHF    = curAmt > 0 ? previewHF : healthFactor
+  const displayColor = hfColor(displayHF)
+  const displayLabel = hfLabel(displayHF)
+  const barPct       = hfToBarPct(displayHF)
+  const beforeHF     = healthFactor
+  const beforeColor  = hfColor(beforeHF)
+  const beforePct    = hfToBarPct(beforeHF)
+  const showBefore   = curAmt > 0 && beforeHF !== displayHF
+
+  const btnBg = isOverMax
+    ? 'linear-gradient(135deg, #ef4444 0%, #b91c1c 100%)'
+    : canReview
+      ? `linear-gradient(135deg, ${accent} 0%, ${isBorrowSide ? '#d97706' : '#0d9488'} 100%)`
+      : 'transparent'
+  const btnBorder = isEmpty ? `1px solid #1e4040` : 'none'
+  const btnColor  = isOverMax || canReview ? '#071e1e' : '#4a7878'
+  const btnLabel  = isEmpty
+    ? 'Enter an amount'
+    : isOverMax
+      ? modal.type === 'repay' ? 'Cannot repay more than you owe' : modal.type === 'borrow' ? 'Exceeds borrow limit' : modal.type === 'withdraw' ? 'Exceeds max safe withdrawal' : 'Exceeds available balance'
+      : 'Review Transaction →'
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(3,11,11,0.90)', backdropFilter: 'blur(7px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+      onClick={e => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="modal-card" style={{ background: 'linear-gradient(160deg, #0e2e2e, #0a2424)', border: '1px solid #1e4040', borderRadius: 22, boxShadow: `0 0 80px ${accent}12, 0 32px 80px #00000095`, width: '100%', maxWidth: 420, overflow: 'hidden' }}>
+        <div style={{ height: 2, background: `linear-gradient(90deg, transparent, ${accent}, transparent)` }} />
+        <div style={{ padding: '22px 26px 0' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+              <div style={{ width: 38, height: 38, borderRadius: 10, background: modal.asset.color + '18', border: `1px solid ${modal.asset.color}35`, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                <img src={modal.asset.icon} alt={modal.asset.symbol} style={{ width: 24, height: 24, objectFit: 'contain' }} />
+              </div>
+              <div>
+                <p style={{ fontSize: 14, fontWeight: 700, color: '#fff' }}>{modal.asset.symbol}</p>
+                <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: accent, background: accent + '15', border: `1px solid ${accent}30`, borderRadius: 5, padding: '2px 7px' }}>{modal.type}</span>
+              </div>
+            </div>
+            <button onClick={onClose} style={{ background: 'transparent', border: '1px solid #1e4040', color: '#4a7878', cursor: 'pointer', width: 30, height: 30, borderRadius: 9, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, transition: 'all 0.15s' }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor='#2a5a5a'; e.currentTarget.style.color='#fff' }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor='#1e4040'; e.currentTarget.style.color='#4a7878' }}>×</button>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20 }}>
+            {['Amount', 'Review'].map((label, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div style={{ width: 18, height: 18, borderRadius: '50%', fontSize: 9, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', background: modalStep > i ? accent : modalStep === i+1 ? accent+'20' : '#0d2828', border: `1px solid ${modalStep >= i+1 ? accent : '#1a3838'}`, color: modalStep > i ? '#071e1e' : modalStep === i+1 ? accent : '#2a5050' }}>
+                  {i+1}
+                </div>
+                <span style={{ fontSize: 10, color: modalStep === i+1 ? '#7ababa' : '#2a5050' }}>{label}</span>
+                {i === 0 && <div style={{ width: 18, height: 1, background: '#1a3838' }} />}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {modalStep === 1 && (
+          <div style={{ padding: '0 26px 26px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', background: '#071818', border: '1px solid #0d2424', borderRadius: 10, padding: '12px 15px', marginBottom: 14 }}>
+              <div>
+                <p style={{ fontSize: 8, color: '#5a8888', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 3 }}>{modal.type === 'supply' || modal.type === 'withdraw' ? 'Supply APY' : 'Borrow Rate'}</p>
+                <p style={{ fontSize: 16, fontWeight: 700, color: accent, fontFamily: 'IBM Plex Mono', lineHeight: 1 }}>{modal.type === 'supply' || modal.type === 'withdraw' ? fmtPct(modal.asset.supplyApy) : fmtPct(modal.asset.borrowRate)}</p>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <p style={{ fontSize: 8, color: '#5a8888', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 3 }}>
+                  {modal.type === 'withdraw' && isWithdrawHfLimited ? 'Max (health-safe)' : 'Available'}
+                </p>
+                <p style={{ fontSize: 16, fontWeight: 700, color: '#fff', fontFamily: 'IBM Plex Mono', lineHeight: 1 }}>{fmtToken(avail, 4)}</p>
+                <p style={{ fontSize: 8, color: '#5a8888', marginTop: 2 }}>{modal.asset.symbol}</p>
+              </div>
+            </div>
+
+            {isWithdrawHfLimited && (
+              <div style={{ background: '#f59e0b0d', border: '1px solid #f59e0b30', borderRadius: 9, padding: '9px 13px', marginBottom: 12, display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                <span style={{ fontSize: 13, flexShrink: 0 }}>⚠</span>
+                <p style={{ fontSize: 10, color: '#d4a050', lineHeight: 1.55 }}>Withdrawal limited to {fmtToken(avail, 4)} {modal.asset.symbol} to keep health factor above 1.0. Repay borrows first to unlock more.</p>
+              </div>
+            )}
+
+            {noCollateral ? (
+              <>
+                <div style={{ background: '#f59e0b0d', border: '1px solid #f59e0b30', borderRadius: 12, padding: '18px', marginBottom: 14 }}>
+                  <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                    <div style={{ flexShrink: 0, width: 32, height: 32, borderRadius: 9, background: '#f59e0b18', border: '1px solid #f59e0b35', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16 }}>⚠</div>
+                    <div>
+                      <p style={{ fontSize: 13, fontWeight: 700, color: '#fbbf24', marginBottom: 5, lineHeight: 1.3 }}>Supply collateral first</p>
+                      <p style={{ fontSize: 11, color: '#a07830', lineHeight: 1.6 }}>You have no supplied assets. To borrow {modal.asset.symbol}, supply an asset as collateral first.</p>
+                    </div>
+                  </div>
+                </div>
+                <div style={{ background: '#071818', border: '1px solid #0d2424', borderRadius: 10, padding: '13px 15px', marginBottom: 18, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: 10, color: '#3a6060' }}>Your borrow limit</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: '#2a5050', fontFamily: 'IBM Plex Mono' }}>$0.00</span>
+                </div>
+                <button onClick={onClose} style={{ width: '100%', padding: '14px', borderRadius: 12, fontSize: 13, fontWeight: 700, background: 'linear-gradient(135deg, #14b8a6 0%, #0d9488 100%)', border: 'none', color: '#071e1e', cursor: 'pointer' }}>Go Supply an Asset →</button>
+              </>
+            ) : (
+              <>
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                    <span style={{ fontSize: 9, color: '#4a7878' }}>0%</span>
+                    <span style={{ fontSize: 9, fontWeight: 600, color: accent, fontFamily: 'IBM Plex Mono' }}>{sliderPct}%</span>
+                    <span onClick={() => setModalAmount(String(avail.toFixed(6)))} style={{ fontSize: 9, fontWeight: 600, color: accent, cursor: 'pointer', textDecoration: 'underline', textDecorationStyle: 'dotted', textUnderlineOffset: 2 }}>Max</span>
+                  </div>
+                  <div className="modal-slider-wrap">
+                    <div className="modal-slider-track" />
+                    <div className="modal-slider-fill" style={{ width: `${sliderPct}%` }} />
+                    <input type="range" min="0" max="100" step="1" value={sliderPct}
+                      onChange={e => { const pct = parseInt(e.target.value); setModalAmount(pct === 0 ? '' : pct === 100 ? String(avail.toFixed(6)) : String((avail * pct / 100).toFixed(6))) }}
+                      className="modal-slider" />
+                  </div>
+                </div>
+                <div style={{ position: 'relative', marginBottom: 8 }}>
+                  <input type="number" placeholder="0.00" value={modalAmount} onChange={e => setModalAmount(e.target.value)} autoFocus
+                    style={{ width: '100%', background: '#071a1a', border: `1px solid ${isOverMax ? '#ef444460' : '#163030'}`, borderRadius: 12, padding: '15px 80px 15px 15px', fontSize: 22, color: '#fff', outline: 'none', fontFamily: 'IBM Plex Mono, monospace', boxSizing: 'border-box' }}
+                    onFocus={e => e.target.style.borderColor = isOverMax ? '#ef444480' : '#1e5050'}
+                    onBlur={e => e.target.style.borderColor = isOverMax ? '#ef444460' : '#163030'} />
+                  <div style={{ position: 'absolute', right: 13, top: '50%', transform: 'translateY(-50%)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <div style={{ width: 16, height: 16, borderRadius: 4, background: modal.asset.color+'20', border: `1px solid ${modal.asset.color}30`, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                      <img src={modal.asset.icon} alt={modal.asset.symbol} style={{ width: 11, height: 11, objectFit: 'contain' }} />
+                    </div>
+                    <span style={{ fontSize: 11, color: '#5a8e8e', fontWeight: 600 }}>{modal.asset.symbol}</span>
+                  </div>
+                </div>
+                <p style={{ fontSize: 10, color: '#5a8888', fontFamily: 'IBM Plex Mono', marginBottom: isOverMax ? 6 : 12 }}>≈ {fmtUSD(curAmt * modal.asset.price)}</p>
+                {isOverMax && (
+                  <div style={{ background: '#ef444412', border: '1px solid #ef444430', borderRadius: 8, padding: '8px 12px', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 7 }}>
+                    <span style={{ fontSize: 13, lineHeight: 1 }}>⚠</span>
+                    <p style={{ fontSize: 10, color: '#f87171', lineHeight: 1.5 }}>
+                      {modal.type === 'borrow' ? `Amount exceeds your borrow limit of ${fmtToken(avail, 4)} ${modal.asset.symbol}`
+                        : modal.type === 'repay' ? `You only owe ${fmtToken(avail, 4)} ${modal.asset.symbol}`
+                        : modal.type === 'withdraw' ? `Exceeds max safe withdrawal of ${fmtToken(avail, 4)} ${modal.asset.symbol} (health factor constraint)`
+                        : `Amount exceeds available balance of ${fmtToken(avail, 4)} ${modal.asset.symbol}`}
+                    </p>
+                  </div>
+                )}
+                {(isBorrowSide || totalBorrowedUSD > 0) && (
+                  <div style={{ background: '#071818', border: `1px solid ${displayColor}28`, borderRadius: 10, padding: '14px 16px', marginBottom: 18 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                      <span style={{ fontSize: 10, color: '#5a8888', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Health Factor</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                        {showBefore && <span style={{ fontSize: 12, fontFamily: 'IBM Plex Mono', color: beforeColor, opacity: 0.45 }}>{beforeHF === null ? '∞' : beforeHF.toFixed(2)}</span>}
+                        {showBefore && <span style={{ fontSize: 9, color: '#3a5a5a' }}>→</span>}
+                        <span style={{ fontSize: 17, fontWeight: 700, fontFamily: 'IBM Plex Mono', color: displayColor }}>{displayHF === null ? '∞' : displayHF.toFixed(2)}</span>
+                        <span style={{ fontSize: 9, fontWeight: 600, color: displayColor, background: displayColor+'18', border: `1px solid ${displayColor}35`, borderRadius: 5, padding: '2px 7px' }}>{displayLabel}</span>
+                      </div>
+                    </div>
+                    <div style={{ position: 'relative', height: 7, background: 'linear-gradient(90deg, #ef4444 0%, #f59e0b 17%, #84cc16 50%, #14b8a6 100%)', borderRadius: 4, overflow: 'hidden' }}>
+                      <div style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: `${100 - barPct*100}%`, background: '#0a1818', transition: 'width 0.4s' }} />
+                      {showBefore && <div style={{ position: 'absolute', top: 0, left: `${barPct*100}%`, height: '100%', width: `${Math.max(0, beforePct - barPct)*100}%`, background: beforeColor+'40', transition: 'all 0.4s' }} />}
+                      <div style={{ position: 'absolute', top: -3, bottom: -3, left: `${1/6*100}%`, width: 1.5, background: '#ef444460' }} />
+                      <div style={{ position: 'absolute', top: -3, bottom: -3, left: '50%', width: 1, background: '#2a505060' }} />
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 7 }}>
+                      <span style={{ fontSize: 8, color: '#ef444470' }}>← Liquidation at 1.0</span>
+                      <span style={{ fontSize: 8, color: '#14b8a650' }}>Safe ≥ 3.0 →</span>
+                    </div>
+                  </div>
+                )}
+                {modal.type === 'supply' && (() => {
+                  const supplyUSD = curAmt * modal.asset.price
+                  const borrowPower = supplyUSD * (modal.asset.ltv / 100)
+                  const yieldAnnual = curAmt * (modal.asset.supplyApy / 100)
+                  const yieldMonthly = yieldAnnual / 12
+                  const hasAmt = curAmt > 0
+                  return (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14 }}>
+                      <div style={{ background: '#071818', border: `1px solid ${hasAmt ? '#f59e0b28' : '#0d2424'}`, borderRadius: 10, padding: '12px 14px' }}>
+                        <p style={{ fontSize: 8, color: '#5a7070', textTransform: 'uppercase', letterSpacing: '0.09em', marginBottom: 6 }}>Borrow Power</p>
+                        <p style={{ fontSize: 15, fontWeight: 700, fontFamily: 'IBM Plex Mono', color: hasAmt ? '#f59e0b' : '#2a4040', lineHeight: 1 }}>{hasAmt ? fmtUSD(borrowPower) : '$—'}</p>
+                        <p style={{ fontSize: 8, color: hasAmt ? '#7a5520' : '#1a3030', marginTop: 4 }}>{hasAmt ? `${modal.asset.ltv}% LTV on ${fmtUSD(supplyUSD)}` : `${modal.asset.ltv}% LTV applied`}</p>
+                      </div>
+                      <div style={{ background: '#071818', border: `1px solid ${hasAmt ? '#14b8a628' : '#0d2424'}`, borderRadius: 10, padding: '12px 14px' }}>
+                        <p style={{ fontSize: 8, color: '#5a7070', textTransform: 'uppercase', letterSpacing: '0.09em', marginBottom: 6 }}>Est. Yield</p>
+                        <p style={{ fontSize: 15, fontWeight: 700, fontFamily: 'IBM Plex Mono', color: hasAmt ? '#14b8a6' : '#2a4040', lineHeight: 1 }}>{hasAmt ? `${fmtToken(yieldAnnual, 4)} ${modal.asset.symbol}` : '—'}</p>
+                        <p style={{ fontSize: 8, color: hasAmt ? '#2a6a5a' : '#1a3030', marginTop: 4 }}>{hasAmt ? `per year · ${fmtToken(yieldMonthly, 4)} ${modal.asset.symbol}/mo` : `${modal.asset.supplyApy}% APY`}</p>
+                      </div>
+                    </div>
+                  )
+                })()}
+                <button onClick={() => canReview && setModalStep(2)}
+                  style={{ width: '100%', padding: '14px', borderRadius: 12, fontSize: 13, fontWeight: 700, background: btnBg, border: btnBorder, color: btnColor, cursor: canReview ? 'pointer' : 'default', transition: 'all 0.2s', letterSpacing: '-0.01em' }}>
+                  {btnLabel}
+                </button>
+              </>
+            )}
+          </div>
+        )}
+
+        {modalStep === 2 && (
+          <div style={{ padding: '0 26px 26px' }}>
+            <div style={{ background: '#071818', border: '1px solid #0d2424', borderRadius: 12, padding: '15px 17px', marginBottom: 14 }}>
+              <p style={{ fontSize: 10, color: '#3a6060', marginBottom: 5, textTransform: 'capitalize' }}>{modal.type}ing</p>
+              <p style={{ fontSize: 24, fontWeight: 700, color: '#fff', fontFamily: 'IBM Plex Mono', lineHeight: 1 }}>{fmtToken(parseFloat(modalAmount), 6)} {modal.asset.symbol}</p>
+              <p style={{ fontSize: 11, color: '#5a8888', marginTop: 4, fontFamily: 'IBM Plex Mono' }}>≈ {fmtUSD(parseFloat(modalAmount) * modal.asset.price)}</p>
+            </div>
+            <div style={{ border: '1px solid #0d2424', borderRadius: 12, overflow: 'hidden', marginBottom: 14 }}>
+              {[
+                { label: modal.type === 'supply' || modal.type === 'withdraw' ? 'Supply APY' : 'Borrow Rate', value: modal.type === 'supply' || modal.type === 'withdraw' ? fmtPct(modal.asset.supplyApy) : fmtPct(modal.asset.borrowRate), color: accent },
+                { label: 'Max LTV',        value: `${modal.asset.ltv}%`,  color: '#8ecece' },
+                { label: 'Network',        value: 'Canton Network',        color: '#8ecece' },
+                { label: 'Settlement',     value: 'T+0',                   color: '#8ecece' },
+                { label: 'MEV Protection', value: 'Enabled',               color: '#14b8a6' },
+                { label: 'Execution',      value: 'Confidential',          color: '#14b8a6' },
+              ].map((row, i) => (
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 15px', borderTop: i > 0 ? '1px solid #071818' : 'none', background: i%2===0 ? 'transparent' : '#071818' }}>
+                  <span style={{ fontSize: 10, color: '#3a6060' }}>{row.label}</span>
+                  <span style={{ fontSize: 10, fontWeight: 600, color: row.color, fontFamily: 'IBM Plex Mono' }}>{row.value}</span>
+                </div>
+              ))}
+            </div>
+            <div style={{ background: '#14b8a608', border: '1px solid #14b8a622', borderRadius: 12, padding: '13px 15px', marginBottom: 18, display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+              <div style={{ flexShrink: 0, marginTop: 1 }}><IconShield size={15} color="#14b8a6" /></div>
+              <div>
+                <p style={{ fontSize: 11, fontWeight: 600, color: '#14b8a6', marginBottom: 4 }}>Encrypted on Canton Network</p>
+                <p style={{ fontSize: 10, color: '#3a6060', lineHeight: 1.55 }}>Your position is processed with confidential smart contracts and is not visible to other market participants.</p>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={() => setModalStep(1)} style={{ padding: '13px 16px', borderRadius: 12, fontSize: 12, fontWeight: 600, background: 'transparent', border: '1px solid #1e4040', color: '#4a7878', cursor: 'pointer', flexShrink: 0 }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor='#2a5a5a'; e.currentTarget.style.color='#fff' }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor='#1e4040'; e.currentTarget.style.color='#4a7878' }}>← Back</button>
+              <button onClick={handleConfirm} style={{ flex: 1, padding: '13px', borderRadius: 12, fontSize: 13, fontWeight: 700, background: `linear-gradient(135deg, ${accent} 0%, ${isBorrowSide ? '#d97706' : '#0d9488'} 100%)`, border: 'none', color: '#071e1e', cursor: 'pointer', transition: 'opacity 0.15s' }}
+                onMouseEnter={e => e.currentTarget.style.opacity='0.88'} onMouseLeave={e => e.currentTarget.style.opacity='1'}>
+                {modal.type === 'supply' ? `Confirm Supply ${modal.asset.symbol}` : modal.type === 'borrow' ? `Confirm Borrow ${modal.asset.symbol}` : modal.type === 'repay' ? `Confirm Repay ${modal.asset.symbol}` : `Confirm Withdraw ${modal.asset.symbol}`}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RATE MODEL CHART
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Labeled donut ring (utilization %)
+function UtilDonut({ pct, color }) {
+  const size = 78, stroke = 7
+  const r = (size / 2) - stroke - 1
+  const circ = 2 * Math.PI * r
+  const off  = circ * (1 - Math.min(pct, 1))
+  return (
+    <div style={{ position: 'relative', width: size, height: size, flexShrink: 0 }}>
+      <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
+        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="#0a1e1e" strokeWidth={stroke} />
+        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth={stroke}
+          strokeDasharray={`${circ} ${circ}`} strokeDashoffset={off} strokeLinecap="round"
+          style={{ transition: 'stroke-dashoffset 0.5s' }} />
+      </svg>
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: '#fff', fontFamily: 'IBM Plex Mono' }}>{Math.round(pct * 100)}%</span>
+      </div>
+    </div>
+  )
+}
+
+// SVG line chart — Borrow APR kink model only (Aave-style)
+function IRModelChart({ asset, util }) {
+  const W = 360, H = 140
+  const padL = 38, padR = 16, padT = 24, padB = 26
+  const chartW = W - padL - padR
+  const chartH = H - padT - padB
+  const optimalUtil = 0.80
+  const borrowAt = (u) => u <= optimalUtil
+    ? asset.borrowRate * 0.7 * (u / optimalUtil)
+    : asset.borrowRate * 0.7 + asset.borrowRate * 2.3 * ((u - optimalUtil) / (1 - optimalUtil))
+  const maxRate = borrowAt(1)
+  const xS = (u) => padL + u * chartW
+  const yS = (r) => padT + chartH - (r / maxRate) * chartH
+  const pts = Array.from({ length: 101 }, (_, i) => i / 100)
+  const pathD = pts.map((u, i) => `${i === 0 ? 'M' : 'L'}${xS(u).toFixed(1)},${yS(borrowAt(u)).toFixed(1)}`).join(' ')
+  const curX = xS(util)
+  const curY = yS(borrowAt(util))
+  const optX = xS(optimalUtil)
+  return (
+    <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ overflow: 'visible' }}>
+      {/* Horizontal grid */}
+      {[0, 0.25, 0.5, 0.75, 1].map((r, i) => (
+        <line key={i} x1={padL} x2={W - padR} y1={yS(maxRate * r)} y2={yS(maxRate * r)}
+          stroke="#122828" strokeWidth="1" strokeDasharray="3,5" />
+      ))}
+      {/* Y axis ticks */}
+      {[0, asset.borrowRate * 0.7, maxRate].map((r, i) => (
+        <text key={i} x={padL - 5} y={yS(r) + 3} textAnchor="end" fontSize="6.5" fill="#4a7070" fontFamily="IBM Plex Mono, monospace">
+          {r === 0 ? '0%' : r.toFixed(1) + '%'}
+        </text>
+      ))}
+      {/* Optimal utilization dashed vertical — label inside chart, right of line */}
+      <line x1={optX} x2={optX} y1={padT} y2={padT + chartH} stroke="#2a5050" strokeWidth="1.2" strokeDasharray="4,4" />
+      <text x={optX + 5} y={padT + 12} textAnchor="start" fontSize="6.5" fill="#4a7878" fontFamily="IBM Plex Mono, monospace">Optimal 80%</text>
+      {/* Borrow APR kink line */}
+      <path d={pathD} fill="none" stroke="#f59e0b" strokeWidth="2" strokeLinejoin="round" />
+      {/* Current utilization dashed vertical — label inside chart, left of line */}
+      <line x1={curX} x2={curX} y1={padT} y2={padT + chartH} stroke="#4a9090" strokeWidth="1.2" strokeDasharray="4,4" />
+      <text x={curX - 5} y={padT + 12} textAnchor="end" fontSize="6.5" fill="#6ab0b0" fontFamily="IBM Plex Mono, monospace">Current {(util * 100).toFixed(1)}%</text>
+      {/* Dot at current util */}
+      <circle cx={curX} cy={curY} r="3.5" fill="#4a9090" />
+      {/* X axis */}
+      <line x1={padL} x2={W - padR} y1={padT + chartH} y2={padT + chartH} stroke="#1a3232" strokeWidth="1" />
+      {[0, 0.25, 0.5, 0.75, 1].map((u, i) => (
+        <text key={i} x={xS(u)} y={H - 4} textAnchor="middle" fontSize="6.5" fill="#4a7070" fontFamily="IBM Plex Mono, monospace">{Math.round(u * 100)}%</text>
+      ))}
+      {/* Y axis */}
+      <line x1={padL} x2={padL} y1={padT} y2={padT + chartH} stroke="#1a3232" strokeWidth="1" />
+    </svg>
+  )
+}
+
+// APR history chart — Aave-style time series with tabs + avg line
+function APRHistoryChart({ baseRate, color, label }) {
+  const TABS = ['1w', '1m', '6m', '1y']
+  const [tab, setTab] = useState('1w')
+  const W = 560, H = 110
+  const padL = 36, padR = 12, padT = 14, padB = 22
+  const chartW = W - padL - padR
+  const chartH = H - padT - padB
+
+  // Generate deterministic noisy data seeded by baseRate + tab
+  const pts = useMemo(() => {
+    const counts = { '1w': 84, '1m': 90, '6m': 120, '1y': 140 }
+    const noise  = { '1w': 0.28, '1m': 0.32, '6m': 0.40, '1y': 0.48 }
+    const n = counts[tab], amp = noise[tab]
+    let v = baseRate, seed = baseRate * 1000 + tab.length * 31
+    const lcg = () => { seed = (seed * 1664525 + 1013904223) % 4294967296; return seed / 4294967296 }
+    return Array.from({ length: n }, (_, i) => {
+      const drift = (lcg() - 0.49) * amp
+      v = Math.max(baseRate * 0.55, Math.min(baseRate * 1.65, v + drift))
+      return v
+    })
+  }, [baseRate, tab])
+
+  const avg   = pts.reduce((a, b) => a + b, 0) / pts.length
+  const minV  = Math.min(...pts) * 0.85
+  const maxV  = Math.max(...pts) * 1.12
+  const range = maxV - minV || 1
+  const xS = (i) => padL + (i / (pts.length - 1)) * chartW
+  const yS = (v) => padT + chartH - ((v - minV) / range) * chartH
+  const pathD = pts.map((v, i) => `${i === 0 ? 'M' : 'L'}${xS(i).toFixed(1)},${yS(v).toFixed(1)}`).join(' ')
+  const avgY  = yS(avg)
+
+  // Y axis ticks
+  const yTicks = [minV, (minV + maxV) / 2, maxV]
+
+  // Gradient fill
+  const gradId = `apr-grad-${color.replace('#', '')}`
+
+  return (
+    <div>
+      {/* Header row */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+          <div style={{ width: 7, height: 7, borderRadius: '50%', background: color }} />
+          <span style={{ fontSize: 11, fontWeight: 500, color: '#a0c8c8' }}>{label}</span>
+        </div>
+        {/* Tab switcher */}
+        <div style={{ display: 'flex', gap: 2, background: '#0a2020', borderRadius: 8, padding: 3, border: '1px solid #1a3232' }}>
+          {TABS.map(t => (
+            <button key={t} onClick={() => setTab(t)} style={{
+              fontSize: 10, fontWeight: tab === t ? 700 : 400,
+              padding: '3px 9px', borderRadius: 6, border: 'none', cursor: 'pointer', transition: 'all 0.12s',
+              background: tab === t ? '#1a3e3e' : 'transparent',
+              color: tab === t ? '#c8e8e8' : '#557070',
+            }}>{t}</button>
+          ))}
+        </div>
+      </div>
+
+      {/* SVG chart */}
+      <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ overflow: 'visible' }}>
+        <defs>
+          <linearGradient id={gradId} x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity="0.18" />
+            <stop offset="100%" stopColor={color} stopOpacity="0" />
+          </linearGradient>
+        </defs>
+
+        {/* Y axis ticks */}
+        {yTicks.map((v, i) => (
+          <text key={i} x={padL - 4} y={yS(v) + 3} textAnchor="end" fontSize="8" fill="#4a7070" fontFamily="Inter, sans-serif">
+            {v.toFixed(1)}%
+          </text>
+        ))}
+
+        {/* Horizontal grid */}
+        {yTicks.map((v, i) => (
+          <line key={i} x1={padL} x2={W - padR} y1={yS(v)} y2={yS(v)} stroke="#152c2c" strokeWidth="1" strokeDasharray="3,4" />
+        ))}
+
+        {/* Area fill */}
+        <path d={`${pathD} L${xS(pts.length - 1)},${padT + chartH} L${padL},${padT + chartH} Z`}
+          fill={`url(#${gradId})`} />
+
+        {/* Average dashed line */}
+        <line x1={padL} x2={W - padR} y1={avgY} y2={avgY} stroke={color} strokeWidth="1" strokeDasharray="5,4" strokeOpacity="0.5" />
+        {/* Avg label */}
+        <rect x={padL + 4} y={avgY - 9} width={58} height={13} rx={4} fill="#0d2828" />
+        <text x={padL + 33} y={avgY + 1} textAnchor="middle" fontSize="8" fill={color} fontFamily="IBM Plex Mono, monospace" fontWeight="600">
+          Avg {avg.toFixed(2)}%
+        </text>
+
+        {/* Rate line */}
+        <path d={pathD} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" />
+
+        {/* X axis */}
+        <line x1={padL} x2={W - padR} y1={padT + chartH} y2={padT + chartH} stroke="#1a3232" strokeWidth="1" />
+      </svg>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ASSET DETAIL PAGE
+// ─────────────────────────────────────────────────────────────────────────────
+
+function AssetDetailScreen({ positions, setPositions, balance, partyId, onLogout, connected }) {
+  useEffect(() => { document.title = 'Alpend — Asset Detail' }, [])
+  const { assetId } = useParams()
+  const nav = useNavigate()
+  const [modal, setModal] = useState(null)
+
+  const asset = MARKET_ASSETS.find(a => a.id === assetId)
+  if (!asset) return (
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#071e1e' }}>
+      <div style={{ textAlign: 'center' }}>
+        <p style={{ color: '#4a7878', marginBottom: 16 }}>Asset not found</p>
+        <button onClick={() => nav('/markets')} style={{ color: '#14b8a6', background: 'transparent', border: '1px solid #14b8a640', borderRadius: 8, padding: '8px 20px', cursor: 'pointer', fontSize: 13 }}>← Back to Markets</button>
+      </div>
+    </div>
+  )
+
+  const util              = asset.totalBorrowed / asset.totalSupplied
+  const tvlUSD            = asset.totalSupplied * asset.price
+  const borrowedUSD       = asset.totalBorrowed * asset.price
+  const availableTokens   = asset.totalSupplied - asset.totalBorrowed
+  const availableUSD      = availableTokens * asset.price
+  const walletTokens      = parseFloat(balance?.[asset.walletKey] || 0)
+  const userSupplied      = parseFloat(positions.supplied[asset.id] || 0)
+  const userBorrowed      = parseFloat(positions.borrowed[asset.id] || 0)
+  const userSuppliedUSD   = userSupplied * asset.price
+  const userBorrowedUSD   = userBorrowed * asset.price
+
+  const totalBorrowedUSD  = Object.entries(positions.borrowed).reduce((s, [id, amt]) => {
+    const a = MARKET_ASSETS.find(x => x.id === id); return s + (parseFloat(amt) || 0) * a.price }, 0)
+  const totalSuppliedUSD  = Object.entries(positions.supplied).reduce((s, [id, amt]) => {
+    const a = MARKET_ASSETS.find(x => x.id === id); return s + (parseFloat(amt) || 0) * a.price }, 0)
+  const healthFactor = totalBorrowedUSD > 0
+    ? Object.entries(positions.supplied).reduce((s, [id, amt]) => {
+        const a = MARKET_ASSETS.find(x => x.id === id)
+        return s + (parseFloat(amt) || 0) * a.price * (a.ltv / 100) }, 0) / totalBorrowedUSD
+    : null
+  const hfCol = hfColor(healthFactor)
+
+  const collateralUSD         = Object.entries(positions.supplied).reduce((s, [id, amt]) => {
+    const a = MARKET_ASSETS.find(x => x.id === id)
+    return s + (parseFloat(amt) || 0) * a.price * (a.ltv / 100) }, 0)
+  const availableToBorrowUSD    = Math.max(0, collateralUSD - totalBorrowedUSD)
+  const availableToBorrowTokens = availableToBorrowUSD / asset.price
+
+  const card = (extra = {}) => ({ background: '#0d2828', border: '1px solid #1a3a3a', borderRadius: 16, overflow: 'hidden', ...extra })
+  const inset = { background: '#0a2020', border: '1px solid #1a3232', borderRadius: 10, padding: '10px 13px' }
+  const lbl = { fontSize: 9, color: '#6b9090', marginBottom: 5, letterSpacing: '0.03em' }
+  const openModal = (type) => setModal({ type, asset })
+  const utilColor = util >= 0.9 ? '#ef4444' : util >= 0.75 ? '#f59e0b' : '#14b8a6'
+
+  // Small inline action button for the "Your info" panel
+  const ActBtn = ({ label, accent = '#14b8a6', onClick, disabled }) => {
+    const [h, setH] = useState(false)
+    return (
+      <button onClick={onClick} disabled={disabled}
+        onMouseEnter={() => setH(true)} onMouseLeave={() => setH(false)}
+        style={{ padding: '8px 18px', borderRadius: 9, fontSize: 12, fontWeight: 600, cursor: disabled ? 'default' : 'pointer', border: 'none', letterSpacing: '-0.01em', transition: 'all 0.15s', flexShrink: 0,
+          background: disabled ? '#0a2020' : h ? accent : accent + 'cc',
+          color: disabled ? '#2a5050' : '#071e1e' }}>
+        {label}
+      </button>
+    )
+  }
+
+  return (
+    <div className="dot-bg-subtle" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+      <Header partyId={connected ? partyId : null} onLogout={connected ? onLogout : null} />
+
+      {/* Breadcrumb + oracle bar */}
+      <div style={{ marginTop: 56, borderBottom: '1px solid #152e2e', background: '#071e1e', position: 'sticky', top: 56, zIndex: 10 }}>
+        <div className="px-4 sm:px-8 md:px-14" style={{ display: 'flex', alignItems: 'center', gap: 16, height: 50 }}>
+          <button onClick={() => nav('/markets')} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'transparent', border: '1px solid #1a3838', borderRadius: 8, padding: '5px 12px', cursor: 'pointer', color: '#6b9090', fontSize: 11, transition: 'all 0.15s', flexShrink: 0 }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor='#2a5050'; e.currentTarget.style.color='#aedede' }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor='#1a3838'; e.currentTarget.style.color='#6b9090' }}>
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M6.5 1.5 3 5l3.5 3.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            Markets
+          </button>
+          <div style={{ width: 1, height: 18, background: '#1a3838' }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+            <div style={{ width: 26, height: 26, borderRadius: 7, background: asset.color+'20', border: `1px solid ${asset.color}40`, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+              <img src={asset.icon} alt={asset.symbol} style={{ width: 17, height: 17, objectFit: 'contain' }} />
+            </div>
+            <span style={{ fontSize: 14, fontWeight: 700, color: '#e8f4f4' }}>{asset.symbol}</span>
+            <span style={{ fontSize: 11, color: '#6b9090' }}>{asset.name}</span>
+          </div>
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ textAlign: 'right' }}>
+              <p style={{ fontSize: 9, color: '#6b9090', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 1 }}>{asset.oracle}</p>
+              <p style={{ fontSize: 13, fontWeight: 600, color: '#c8e8e8', fontFamily: 'IBM Plex Mono' }}>{fmtUSD(asset.price)}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Stats bar — token amounts PRIMARY, $ secondary */}
+      <div style={{ borderBottom: '1px solid #152e2e', background: '#071e1e' }}>
+        <div className="px-4 sm:px-8 md:px-14" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)' }}>
+          {[
+            { label: 'Total Supplied',  primary: `${fmtToken(asset.totalSupplied, 2)} ${asset.symbol}`,  secondary: fmtUSD(tvlUSD),      color: '#e8f4f4' },
+            { label: 'Total Borrowed',  primary: `${fmtToken(asset.totalBorrowed, 2)} ${asset.symbol}`,  secondary: fmtUSD(borrowedUSD), color: '#f59e0b' },
+            { label: 'Utilization',     primary: fmtPct(util * 100),                                     secondary: null,                color: utilColor },
+            { label: 'Available',       primary: `${fmtToken(availableTokens, 2)} ${asset.symbol}`,      secondary: fmtUSD(availableUSD), color: '#14b8a6' },
+          ].map((s, i) => (
+            <div key={i} style={{ padding: '14px 0', paddingLeft: i === 0 ? 0 : 20, borderLeft: i > 0 ? '1px solid #152e2e' : 'none' }}>
+              <p style={{ fontSize: 8, color: '#6b9090', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 5 }}>{s.label}</p>
+              <p style={{ fontSize: 14, fontWeight: 700, color: s.color, fontFamily: 'IBM Plex Mono', lineHeight: 1 }}>{s.primary}</p>
+              {s.secondary && <p style={{ fontSize: 9, color: '#557070', marginTop: 4, fontFamily: 'IBM Plex Mono' }}>{s.secondary}</p>}
+            </div>
+          ))}
+        </div>
+      </div>
+      <div style={{ height: 2, background: '#0d2828' }}>
+        <div style={{ height: '100%', width: `${util * 100}%`, background: `linear-gradient(90deg, #14b8a6, ${utilColor})`, transition: 'width 0.5s' }} />
+      </div>
+
+      {/* Main layout: left 3fr = reserve config, right 2fr = your info */}
+      <main className="px-4 sm:px-8 md:px-14 pt-6 pb-10" style={{ flex: 1, display: 'grid', gridTemplateColumns: '3fr 2fr', gap: 22, alignItems: 'start' }}>
+
+        {/* ── LEFT: Reserve status & configuration ── */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+          <p style={{ fontSize: 11, fontWeight: 500, color: '#6b9090', marginBottom: 14, letterSpacing: '0.02em', textTransform: 'uppercase' }}>Reserve status &amp; configuration</p>
+
+          <div style={card()}>
+
+            {/* Supply Info */}
+            <div style={{ padding: '20px 24px', borderBottom: '1px solid #1a3a3a' }}>
+              <p style={{ fontSize: 12, fontWeight: 600, color: '#d0eaea', marginBottom: 16 }}>Supply Info</p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 22, marginBottom: 18 }}>
+                <UtilDonut pct={util} color="#14b8a6" />
+                <div style={{ flex: 1 }}>
+                  <p style={{ ...lbl, textTransform: 'uppercase' }}>Total supplied</p>
+                  <p style={{ fontSize: 20, fontWeight: 700, color: '#e8f4f4', fontFamily: 'IBM Plex Mono', lineHeight: 1 }}>{fmtToken(asset.totalSupplied, 2)} <span style={{ fontSize: 13, color: '#6b9090' }}>{asset.symbol}</span></p>
+                  <p style={{ fontSize: 10, color: '#557070', fontFamily: 'IBM Plex Mono', marginTop: 3 }}>{fmtUSD(tvlUSD)}</p>
+                </div>
+                <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                  <p style={{ ...lbl, textTransform: 'uppercase' }}>Supply APR</p>
+                  <p style={{ fontSize: 26, fontWeight: 700, color: '#14b8a6', fontFamily: 'IBM Plex Mono', lineHeight: 1 }}>{fmtPct(asset.supplyApy)}</p>
+                </div>
+              </div>
+
+              {/* Collateral usage */}
+              <div style={{ borderTop: '1px solid #1a3a3a', paddingTop: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                  <span style={{ fontSize: 11, color: '#a0c8c8', fontWeight: 500 }}>Collateral usage</span>
+                  <span style={{ fontSize: 9, color: '#14b8a6', background: '#14b8a610', border: '1px solid #14b8a630', borderRadius: 5, padding: '2px 8px', fontWeight: 600 }}>✓ Can be collateral</span>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                  {[
+                    { label: 'Max LTV',               value: `${asset.ltv}%` },
+                    { label: 'Liquidation threshold', value: `${asset.liquidationThreshold}%` },
+                    { label: 'Liquidation penalty',   value: `${asset.liquidationPenalty}%` },
+                  ].map((r, i) => (
+                    <div key={i} style={inset}>
+                      <p style={lbl}>{r.label}</p>
+                      <p style={{ fontSize: 15, fontWeight: 700, color: '#e8f4f4', fontFamily: 'IBM Plex Mono' }}>{r.value}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Supply APR history chart */}
+            <div style={{ padding: '16px 24px', borderBottom: '1px solid #1a3a3a' }}>
+              <APRHistoryChart baseRate={asset.supplyApy} color="#14b8a6" label="Supply APR" />
+            </div>
+
+            {/* Borrow Info */}
+            <div style={{ padding: '20px 24px', borderBottom: '1px solid #1a3a3a' }}>
+              <p style={{ fontSize: 12, fontWeight: 600, color: '#d0eaea', marginBottom: 16 }}>Borrow Info</p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 22, marginBottom: 18 }}>
+                <UtilDonut pct={util} color="#f59e0b" />
+                <div style={{ flex: 1 }}>
+                  <p style={{ ...lbl, textTransform: 'uppercase' }}>Total borrowed</p>
+                  <p style={{ fontSize: 20, fontWeight: 700, color: '#e8f4f4', fontFamily: 'IBM Plex Mono', lineHeight: 1 }}>{fmtToken(asset.totalBorrowed, 2)} <span style={{ fontSize: 13, color: '#6b9090' }}>{asset.symbol}</span></p>
+                  <p style={{ fontSize: 10, color: '#557070', fontFamily: 'IBM Plex Mono', marginTop: 3 }}>{fmtUSD(borrowedUSD)}</p>
+                </div>
+                <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                  <p style={{ ...lbl, textTransform: 'uppercase' }}>Borrow APR</p>
+                  <p style={{ fontSize: 26, fontWeight: 700, color: '#f59e0b', fontFamily: 'IBM Plex Mono', lineHeight: 1 }}>{fmtPct(asset.borrowRate)}</p>
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                <div style={inset}>
+                  <p style={lbl}>Borrow cap</p>
+                  <p style={{ fontSize: 15, fontWeight: 700, color: '#e8f4f4', fontFamily: 'IBM Plex Mono' }}>{fmtToken(asset.borrowCap, 0)} <span style={{ fontSize: 10, color: '#6b9090' }}>{asset.symbol}</span></p>
+                </div>
+                <div style={inset}>
+                  <p style={lbl}>Reserve factor</p>
+                  <p style={{ fontSize: 15, fontWeight: 700, color: '#e8f4f4', fontFamily: 'IBM Plex Mono' }}>{asset.reserveFactor}%</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Borrow APR history chart */}
+            <div style={{ padding: '16px 24px', borderBottom: '1px solid #1a3a3a' }}>
+              <APRHistoryChart baseRate={asset.borrowRate} color="#f59e0b" label="Borrow APR, variable" />
+            </div>
+
+            {/* Interest Rate Model */}
+            <div style={{ padding: '20px 24px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                <p style={{ fontSize: 12, fontWeight: 600, color: '#d0eaea' }}>Interest Rate Model</p>
+                <div style={{ display: 'flex', gap: 14 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <div style={{ width: 12, height: 2, background: '#f59e0b', borderRadius: 1 }} />
+                    <span style={{ fontSize: 9, color: '#6b9090' }}>Borrow APR</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#4a9090' }} />
+                    <span style={{ fontSize: 9, color: '#6b9090' }}>Utilization</span>
+                  </div>
+                </div>
+              </div>
+              <IRModelChart asset={asset} util={util} />
+            </div>
+          </div>
+        </div>
+
+        {/* ── RIGHT: Your info ── */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <p style={{ fontSize: 11, fontWeight: 500, color: '#6b9090', marginBottom: -2, letterSpacing: '0.02em', textTransform: 'uppercase' }}>Your info</p>
+
+          {/* Wallet + available panel */}
+          <div style={card()}>
+            {/* Wallet balance */}
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid #1a3a3a' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 8 }}>
+                <div style={{ width: 30, height: 30, borderRadius: 8, background: '#0a2020', border: '1px solid #1a3838', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><rect x="2" y="7" width="20" height="14" rx="2" stroke="#6b9090" strokeWidth="1.5"/><path d="M16 14a1 1 0 1 1-2 0 1 1 0 0 1 2 0z" fill="#6b9090"/><path d="M2 10h20" stroke="#6b9090" strokeWidth="1.5"/><path d="M7 7V5a3 3 0 0 1 3-3h4a3 3 0 0 1 3 3v2" stroke="#6b9090" strokeWidth="1.5" strokeLinecap="round"/></svg>
+                </div>
+                <span style={{ fontSize: 10, color: '#6b9090' }}>Wallet balance</span>
+              </div>
+              <p style={{ fontSize: 18, fontWeight: 700, color: '#e8f4f4', fontFamily: 'IBM Plex Mono', lineHeight: 1 }}>{fmtToken(walletTokens, 4)} <span style={{ fontSize: 12, color: '#6b9090' }}>{asset.symbol}</span></p>
+              <p style={{ fontSize: 10, color: '#557070', fontFamily: 'IBM Plex Mono', marginTop: 3 }}>{fmtUSD(walletTokens * asset.price)}</p>
+            </div>
+
+            {/* Available to supply */}
+            <div style={{ padding: '14px 20px', borderBottom: '1px solid #1a3a3a', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+              <div>
+                <p style={lbl}>Available to supply</p>
+                <p style={{ fontSize: 15, fontWeight: 700, color: walletTokens > 0 ? '#e8f4f4' : '#2a5050', fontFamily: 'IBM Plex Mono', lineHeight: 1 }}>{fmtToken(walletTokens, 4)} <span style={{ fontSize: 10, color: '#6b9090' }}>{asset.symbol}</span></p>
+                <p style={{ fontSize: 9, color: '#557070', fontFamily: 'IBM Plex Mono', marginTop: 2 }}>{fmtUSD(walletTokens * asset.price)}</p>
+              </div>
+              <ActBtn label="Supply" accent="#14b8a6" onClick={() => openModal('supply')} disabled={!connected || walletTokens <= 0} />
+            </div>
+
+            {/* Available to borrow */}
+            <div style={{ padding: '14px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+              <div>
+                <p style={lbl}>Available to borrow</p>
+                <p style={{ fontSize: 15, fontWeight: 700, color: availableToBorrowTokens > 0 ? '#e8f4f4' : '#2a5050', fontFamily: 'IBM Plex Mono', lineHeight: 1 }}>{fmtToken(availableToBorrowTokens, 4)} <span style={{ fontSize: 10, color: '#6b9090' }}>{asset.symbol}</span></p>
+                <p style={{ fontSize: 9, color: '#557070', fontFamily: 'IBM Plex Mono', marginTop: 2 }}>{fmtUSD(availableToBorrowUSD)}</p>
+              </div>
+              <ActBtn label="Borrow" accent="#f59e0b" onClick={() => openModal('borrow')} disabled={!connected || availableToBorrowTokens <= 0} />
+            </div>
+
+            {/* No collateral hint */}
+            {connected && collateralUSD === 0 && (
+              <div style={{ margin: '0 14px 14px', background: '#14b8a608', border: '1px solid #14b8a622', borderRadius: 10, padding: '10px 14px' }}>
+                <p style={{ fontSize: 10, color: '#5a9080', lineHeight: 1.6 }}>To borrow you need to supply any asset to be used as collateral.</p>
+              </div>
+            )}
+          </div>
+
+          {/* Your Supply position */}
+          {connected && userSupplied > 0 && (
+            <div style={card()} className="fade-up">
+              <div style={{ padding: '12px 20px', borderBottom: '1px solid #1a3a3a', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                  <IconShield size={11} color="#14b8a6" />
+                  <span style={{ fontSize: 10, fontWeight: 700, color: '#14b8a6', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Your Supply</span>
+                </div>
+                <span style={{ fontSize: 9, color: '#14b8a6', fontFamily: 'IBM Plex Mono' }}>{fmtPct(asset.supplyApy)} APY</span>
+              </div>
+              <div style={{ padding: '16px 20px' }}>
+                <p style={{ fontSize: 20, fontWeight: 700, color: '#e8f4f4', fontFamily: 'IBM Plex Mono', lineHeight: 1 }}>{fmtToken(userSupplied, 4)} <span style={{ fontSize: 12, color: '#6b9090' }}>{asset.symbol}</span></p>
+                <p style={{ fontSize: 10, color: '#557070', fontFamily: 'IBM Plex Mono', marginBottom: 14, marginTop: 3 }}>{fmtUSD(userSuppliedUSD)}</p>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14 }}>
+                  <div style={inset}>
+                    <p style={lbl}>Est. annual yield</p>
+                    <p style={{ fontSize: 13, fontWeight: 700, color: '#14b8a6', fontFamily: 'IBM Plex Mono' }}>+{fmtToken(userSupplied * asset.supplyApy / 100, 4)}</p>
+                    <p style={{ fontSize: 8, color: '#557070', marginTop: 2 }}>{asset.symbol}/yr · {fmtUSD(userSupplied * asset.supplyApy / 100 * asset.price)}</p>
+                  </div>
+                  <div style={inset}>
+                    <p style={lbl}>Borrow power</p>
+                    <p style={{ fontSize: 13, fontWeight: 700, color: '#f59e0b', fontFamily: 'IBM Plex Mono' }}>{fmtUSD(userSuppliedUSD * asset.ltv / 100)}</p>
+                    <p style={{ fontSize: 8, color: '#6a5a30', marginTop: 2 }}>{asset.ltv}% LTV</p>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={() => openModal('supply')} style={{ flex: 1, fontSize: 11, fontWeight: 600, padding: '9px', borderRadius: 9, background: '#14b8a615', border: '1px solid #14b8a635', color: '#14b8a6', cursor: 'pointer', transition: 'background 0.12s' }}
+                    onMouseEnter={e => e.currentTarget.style.background='#14b8a625'} onMouseLeave={e => e.currentTarget.style.background='#14b8a615'}>+ Supply</button>
+                  <button onClick={() => openModal('withdraw')} style={{ flex: 1, fontSize: 11, fontWeight: 600, padding: '9px', borderRadius: 9, background: 'transparent', border: '1px solid #1e3e3e', color: '#7ababa', cursor: 'pointer', transition: 'all 0.12s' }}
+                    onMouseEnter={e => { e.currentTarget.style.borderColor='#2a5050'; e.currentTarget.style.color='#c0e0e0' }} onMouseLeave={e => { e.currentTarget.style.borderColor='#1e3e3e'; e.currentTarget.style.color='#7ababa' }}>Withdraw</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Your Borrow position */}
+          {connected && userBorrowed > 0 && (
+            <div style={card()} className="fade-up">
+              <div style={{ padding: '12px 20px', borderBottom: '1px solid #1a3a3a', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                  <IconShield size={11} color="#f59e0b" />
+                  <span style={{ fontSize: 10, fontWeight: 700, color: '#f59e0b', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Your Borrow</span>
+                </div>
+                <span style={{ fontSize: 9, color: '#f59e0b', fontFamily: 'IBM Plex Mono' }}>{fmtPct(asset.borrowRate)} APR</span>
+              </div>
+              <div style={{ padding: '16px 20px' }}>
+                <p style={{ fontSize: 20, fontWeight: 700, color: '#e8f4f4', fontFamily: 'IBM Plex Mono', lineHeight: 1 }}>{fmtToken(userBorrowed, 4)} <span style={{ fontSize: 12, color: '#6b9090' }}>{asset.symbol}</span></p>
+                <p style={{ fontSize: 10, color: '#557070', fontFamily: 'IBM Plex Mono', marginBottom: 14, marginTop: 3 }}>{fmtUSD(userBorrowedUSD)}</p>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14 }}>
+                  <div style={inset}>
+                    <p style={lbl}>Annual interest</p>
+                    <p style={{ fontSize: 13, fontWeight: 700, color: '#f59e0b', fontFamily: 'IBM Plex Mono' }}>{fmtToken(userBorrowed * asset.borrowRate / 100, 4)}</p>
+                    <p style={{ fontSize: 8, color: '#7a5a20', marginTop: 2 }}>{asset.symbol}/yr · {fmtUSD(userBorrowed * asset.borrowRate / 100 * asset.price)}</p>
+                  </div>
+                  <div style={inset}>
+                    <p style={lbl}>Health factor</p>
+                    <p style={{ fontSize: 13, fontWeight: 700, color: hfCol, fontFamily: 'IBM Plex Mono' }}>{healthFactor !== null ? healthFactor.toFixed(2) : '—'}</p>
+                    <p style={{ fontSize: 8, color: '#557070', marginTop: 2 }}>{healthFactor !== null ? hfLabel(healthFactor) : ''}</p>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={() => openModal('repay')} style={{ flex: 1, fontSize: 11, fontWeight: 600, padding: '9px', borderRadius: 9, background: '#f59e0b15', border: '1px solid #f59e0b35', color: '#f59e0b', cursor: 'pointer', transition: 'background 0.12s' }}
+                    onMouseEnter={e => e.currentTarget.style.background='#f59e0b25'} onMouseLeave={e => e.currentTarget.style.background='#f59e0b15'}>Repay</button>
+                  <button onClick={() => openModal('borrow')} style={{ flex: 1, fontSize: 11, fontWeight: 600, padding: '9px', borderRadius: 9, background: 'transparent', border: '1px solid #1e3e3e', color: '#7ababa', cursor: 'pointer', transition: 'all 0.12s' }}
+                    onMouseEnter={e => { e.currentTarget.style.borderColor='#2a5050'; e.currentTarget.style.color='#c0e0e0' }} onMouseLeave={e => { e.currentTarget.style.borderColor='#1e3e3e'; e.currentTarget.style.color='#7ababa' }}>+ Borrow</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Portfolio health bar */}
+          {connected && totalBorrowedUSD > 0 && (
+            <div style={card()}>
+              <div style={{ padding: '16px 20px' }}>
+                <HealthBar value={healthFactor === null ? 99 : healthFactor} />
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 14 }}>
+                  <div style={inset}>
+                    <p style={lbl}>Total supplied</p>
+                    <p style={{ fontSize: 12, fontWeight: 700, color: '#14b8a6', fontFamily: 'IBM Plex Mono' }}>{fmtUSD(totalSuppliedUSD)}</p>
+                  </div>
+                  <div style={inset}>
+                    <p style={lbl}>Total borrowed</p>
+                    <p style={{ fontSize: 12, fontWeight: 700, color: '#f59e0b', fontFamily: 'IBM Plex Mono' }}>{fmtUSD(totalBorrowedUSD)}</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </main>
+
+      <Footer />
+
+      {modal && (
+        <ActionModal modal={modal} onClose={() => setModal(null)} positions={positions} setPositions={setPositions} balance={balance} />
+      )}
+    </div>
+  )
+}
+
+function MarketsScreen({ partyId, balance, onLogout, connected = true, onConnect, positions, setPositions }) {
+  useEffect(() => { document.title = 'Alpend — Dashboard' }, [])
+  const nav          = useNavigate()
+  const [modal, setModal]   = useState(null)
+  const [masked, setMasked] = useState(false)
+
+  const walletBal = (asset) => parseFloat(balance?.[asset.walletKey] || 0)
+  const card      = (extra = {}) => ({ background: 'linear-gradient(160deg, #0d2a2a 0%, #091e1e 100%)', border: '1px solid #112828', borderRadius: 16, overflow: 'hidden', ...extra })
+
+  const totalSuppliedUSD = Object.entries(positions.supplied).reduce((s, [id, amt]) => {
+    const a = MARKET_ASSETS.find(x => x.id === id); return s + (parseFloat(amt) || 0) * a.price }, 0)
+  const totalBorrowedUSD = Object.entries(positions.borrowed).reduce((s, [id, amt]) => {
+    const a = MARKET_ASSETS.find(x => x.id === id); return s + (parseFloat(amt) || 0) * a.price }, 0)
+  const netWorth     = totalSuppliedUSD - totalBorrowedUSD
+  const healthFactor = totalBorrowedUSD > 0
+    ? Object.entries(positions.supplied).reduce((s, [id, amt]) => {
+        const a = MARKET_ASSETS.find(x => x.id === id)
+        return s + (parseFloat(amt) || 0) * a.price * (a.ltv / 100) }, 0) / totalBorrowedUSD
+    : null
+  const hfCol    = hfColor(healthFactor)
+  const totalTVL = MARKET_ASSETS.reduce((s, a) => s + a.totalSupplied * a.price, 0)
+  const totalBorrowedProtocol = MARKET_ASSETS.reduce((s, a) => s + a.totalBorrowed * a.price, 0)
+  const netAPY   = totalSuppliedUSD > 0
+    ? Object.entries(positions.supplied).reduce((s, [id, amt]) => {
+        const a = MARKET_ASSETS.find(x => x.id === id)
+        return s + (parseFloat(amt) || 0) * a.price * a.supplyApy }, 0) / totalSuppliedUSD
+    : null
+  const hasPositions = totalSuppliedUSD > 0 || totalBorrowedUSD > 0
+
+  const openModal  = (type, asset) => setModal({ type, asset })
+  const closeModal = () => setModal(null)
 
   const mask = (v) => masked ? '•••••' : v
 
@@ -1194,21 +2030,22 @@ function MarketsScreen({ partyId, balance, onLogout, connected = true, onConnect
           <div style={{ padding: '18px 0' }}>
             <p style={{ fontSize: 8, color: '#4a7878', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 5 }}>Health Factor</p>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 6 }}>
-              <p style={{ fontSize: 18, fontWeight: 700, color: hfColor, fontFamily: 'IBM Plex Mono', lineHeight: 1 }}>
+              <p style={{ fontSize: 18, fontWeight: 700, color: hfCol, fontFamily: 'IBM Plex Mono', lineHeight: 1 }}>
                 {healthFactor !== null ? healthFactor.toFixed(2) : '—'}
               </p>
               {healthFactor !== null && (
-                <span style={{ fontSize: 9, fontWeight: 600, color: hfColor, background: hfColor+'18', border: `1px solid ${hfColor}35`, borderRadius: 5, padding: '1px 6px' }}>
-                  {healthFactor >= 3 ? 'Safe' : healthFactor >= 1.5 ? 'Monitor' : 'At Risk'}
+                <span style={{ fontSize: 9, fontWeight: 600, color: hfCol, background: hfCol+'18', border: `1px solid ${hfCol}35`, borderRadius: 5, padding: '1px 6px' }}>
+                  {hfLabel(healthFactor)}
                 </span>
               )}
             </div>
             {healthFactor !== null && (
               <div style={{ position: 'relative', width: 120 }}>
-                <div style={{ height: 5, background: '#0a1e1e', borderRadius: 3 }}>
-                  <div style={{ height: '100%', borderRadius: 3, background: `linear-gradient(90deg, ${hfColor}70, ${hfColor})`, boxShadow: `0 0 6px ${hfColor}55`, transition: 'width 0.5s', width: `${Math.min(Math.log1p(healthFactor) / Math.log1p(75), 1) * 100}%` }} />
+                <div style={{ height: 5, borderRadius: 3, background: 'linear-gradient(90deg, #ef4444 0%, #f59e0b 17%, #84cc16 50%, #14b8a6 100%)', overflow: 'hidden' }}>
+                  <div style={{ height: '100%', background: '#0a1818', marginLeft: 'auto', transition: 'width 0.5s', width: `${100 - (healthFactor <= 3 ? healthFactor / 6 : 1 - 1.5 / healthFactor) * 100}%` }} />
                 </div>
-                <div style={{ position: 'absolute', top: -2, bottom: -2, left: `${Math.log1p(1) / Math.log1p(75) * 100}%`, width: 1, background: '#ef444455' }} />
+                <div style={{ position: 'absolute', top: -2, bottom: -2, left: `${100/6}%`, width: 1, background: '#ef444455' }} />
+                <div style={{ position: 'absolute', top: -2, bottom: -2, left: '50%', width: 1, background: '#2a505055' }} />
               </div>
             )}
           </div></div>
@@ -1283,7 +2120,10 @@ function MarketsScreen({ partyId, balance, onLogout, connected = true, onConnect
               {Object.entries(positions.supplied).map(([id, amt]) => {
                 const a = MARKET_ASSETS.find(x => x.id === id)
                 return (
-                  <div key={id} style={{ display: 'grid', gridTemplateColumns: '1.8fr 1fr 1fr 88px', padding: '11px 20px', gap: 8, alignItems: 'center', borderTop: '1px solid #071c1c' }}>
+                  <div key={id} style={{ display: 'grid', gridTemplateColumns: '1.8fr 1fr 1fr 88px', padding: '11px 20px', gap: 8, alignItems: 'center', borderTop: '1px solid #071c1c', cursor: 'pointer', transition: 'background 0.15s' }}
+                    onClick={e => { if (e.target.tagName !== 'BUTTON') nav(`/markets/${a.id}`) }}
+                    onMouseEnter={e => e.currentTarget.style.background='#0d2626'}
+                    onMouseLeave={e => e.currentTarget.style.background='transparent'}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <div style={{ width: 28, height: 28, borderRadius: 7, background: a.color+'18', border: `1px solid ${a.color}35`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, overflow: 'hidden' }}>
                         <img src={a.icon} alt={a.symbol} style={{ width: 18, height: 18, objectFit: 'contain' }} />
@@ -1316,8 +2156,8 @@ function MarketsScreen({ partyId, balance, onLogout, connected = true, onConnect
               <span style={{ fontSize: 9, color: '#4a7878' }}>{fmtUSD(totalTVL)} total supplied</span>
             </div>
             {/* Column headers */}
-            <div style={{ display: 'grid', gridTemplateColumns: connected ? '2fr 1.2fr 0.7fr 0.7fr 1fr 88px' : '2fr 1.2fr 0.7fr 0.7fr 88px', padding: '8px 20px', gap: 16 }}>
-              {(connected ? ['Asset', 'Market Size', 'APY', 'Max LTV', 'Wallet', ''] : ['Asset', 'Market Size', 'APY', 'Max LTV', '']).map((h, i) => (
+            <div style={{ display: 'grid', gridTemplateColumns: connected ? '2fr 1.2fr 0.7fr 1fr 88px' : '2fr 1.2fr 0.7fr 88px', padding: '8px 20px', gap: 16 }}>
+              {(connected ? ['Asset', 'Market Size', 'APY', 'Wallet', ''] : ['Asset', 'Market Size', 'APY', '']).map((h, i) => (
                 <span key={i} style={{ fontSize: 9, color: '#4a7878', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{h}</span>
               ))}
             </div>
@@ -1327,8 +2167,9 @@ function MarketsScreen({ partyId, balance, onLogout, connected = true, onConnect
               const wb = walletBal(asset)
               const hasSupply = !!positions.supplied[asset.id]
               return (
-                <div key={asset.id} style={{ display: 'grid', gridTemplateColumns: connected ? '2fr 1.2fr 0.7fr 0.7fr 1fr 88px' : '2fr 1.2fr 0.7fr 0.7fr 88px', padding: '13px 20px', gap: 16, alignItems: 'center', borderTop: '1px solid #0a2020', transition: 'background 0.15s' }}
-                  onMouseEnter={e => e.currentTarget.style.background='#0d262600'}
+                <div key={asset.id} style={{ display: 'grid', gridTemplateColumns: connected ? '2fr 1.2fr 0.7fr 1fr 88px' : '2fr 1.2fr 0.7fr 88px', padding: '13px 20px', gap: 16, alignItems: 'center', borderTop: '1px solid #0a2020', transition: 'background 0.15s', cursor: 'pointer' }}
+                  onClick={e => { if (e.target.tagName !== 'BUTTON') nav(`/markets/${asset.id}`) }}
+                  onMouseEnter={e => e.currentTarget.style.background='#0d2626'}
                   onMouseLeave={e => e.currentTarget.style.background='transparent'}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
                     <div style={{ width: 32, height: 32, borderRadius: 9, background: asset.color+'18', border: `1px solid ${asset.color}35`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, overflow: 'hidden' }}>
@@ -1344,7 +2185,6 @@ function MarketsScreen({ partyId, balance, onLogout, connected = true, onConnect
                     <p style={{ fontSize: 9, color: '#5a8888', fontFamily: 'IBM Plex Mono', marginTop: 2 }}>{fmtUSD(asset.totalSupplied * asset.price)}</p>
                   </div>
                   <span style={{ fontSize: 14, fontWeight: 700, color: '#14b8a6', fontFamily: 'IBM Plex Mono' }}>{fmtPct(asset.supplyApy)}</span>
-                  <span style={{ fontSize: 12, color: '#6aabab', fontFamily: 'IBM Plex Mono' }}>{asset.ltv}%</span>
                   {connected && <div>
                     <p style={{ fontSize: 12, color: '#8ecece', fontFamily: 'IBM Plex Mono' }}>{mask(fmtToken(wb, 2))}</p>
                     <p style={{ fontSize: 9, color: '#5a8888', fontFamily: 'IBM Plex Mono' }}>{mask(fmtUSD(wb * asset.price))}</p>
@@ -1382,7 +2222,10 @@ function MarketsScreen({ partyId, balance, onLogout, connected = true, onConnect
               {Object.entries(positions.borrowed).map(([id, amt]) => {
                 const a = MARKET_ASSETS.find(x => x.id === id)
                 return (
-                  <div key={id} style={{ display: 'grid', gridTemplateColumns: '1.8fr 1fr 1fr 88px', padding: '11px 20px', gap: 8, alignItems: 'center', borderTop: '1px solid #071c1c' }}>
+                  <div key={id} style={{ display: 'grid', gridTemplateColumns: '1.8fr 1fr 1fr 88px', padding: '11px 20px', gap: 8, alignItems: 'center', borderTop: '1px solid #071c1c', cursor: 'pointer', transition: 'background 0.15s' }}
+                    onClick={e => { if (e.target.tagName !== 'BUTTON') nav(`/markets/${a.id}`) }}
+                    onMouseEnter={e => e.currentTarget.style.background='#0d2626'}
+                    onMouseLeave={e => e.currentTarget.style.background='transparent'}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <div style={{ width: 28, height: 28, borderRadius: 7, background: a.color+'18', border: `1px solid ${a.color}35`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, overflow: 'hidden' }}>
                         <img src={a.icon} alt={a.symbol} style={{ width: 18, height: 18, objectFit: 'contain' }} />
@@ -1430,7 +2273,10 @@ function MarketsScreen({ partyId, balance, onLogout, connected = true, onConnect
               const yourLimitTokens = yourLimitUSD / asset.price
               const hasBorrow = !!positions.borrowed[asset.id]
               return (
-                <div key={asset.id} style={{ display: 'grid', gridTemplateColumns: connected ? '2fr 1.1fr 0.8fr 1fr 88px' : '2fr 1.1fr 0.8fr 88px', padding: '13px 20px', gap: 16, alignItems: 'center', borderTop: '1px solid #0a2020', transition: 'background 0.15s' }}>
+                <div key={asset.id} style={{ display: 'grid', gridTemplateColumns: connected ? '2fr 1.1fr 0.8fr 1fr 88px' : '2fr 1.1fr 0.8fr 88px', padding: '13px 20px', gap: 16, alignItems: 'center', borderTop: '1px solid #0a2020', transition: 'background 0.15s', cursor: 'pointer' }}
+                  onClick={e => { if (e.target.tagName !== 'BUTTON') nav(`/markets/${asset.id}`) }}
+                  onMouseEnter={e => e.currentTarget.style.background='#0d2626'}
+                  onMouseLeave={e => e.currentTarget.style.background='transparent'}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
                     <div style={{ width: 32, height: 32, borderRadius: 9, background: asset.color+'18', border: `1px solid ${asset.color}35`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, overflow: 'hidden' }}>
                       <img src={asset.icon} alt={asset.symbol} style={{ width: 20, height: 20, objectFit: 'contain' }} />
@@ -1484,285 +2330,8 @@ function MarketsScreen({ partyId, balance, onLogout, connected = true, onConnect
         ))}
       </div>
 
-      {/* ── Modal ───────────────────────────────────────────────────────── */}
       {modal && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(3,11,11,0.90)', backdropFilter: 'blur(7px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
-          onClick={e => { if (e.target === e.currentTarget) closeModal() }}>
-          <div className="modal-card" style={{ background: 'linear-gradient(160deg, #0e2e2e, #0a2424)', border: '1px solid #1e4040', borderRadius: 22, boxShadow: `0 0 80px ${accent}12, 0 32px 80px #00000095`, width: '100%', maxWidth: 420, overflow: 'hidden' }}>
-
-            {/* Accent top bar */}
-            <div style={{ height: 2, background: `linear-gradient(90deg, transparent, ${accent}, transparent)` }} />
-
-            <div style={{ padding: '22px 26px 0' }}>
-              {/* Header */}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
-                  <div style={{ width: 38, height: 38, borderRadius: 10, background: modal.asset.color + '18', border: `1px solid ${modal.asset.color}35`, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-                    <img src={modal.asset.icon} alt={modal.asset.symbol} style={{ width: 24, height: 24, objectFit: 'contain' }} />
-                  </div>
-                  <div>
-                    <p style={{ fontSize: 14, fontWeight: 700, color: '#fff' }}>{modal.asset.symbol}</p>
-                    <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: accent, background: accent + '15', border: `1px solid ${accent}30`, borderRadius: 5, padding: '2px 7px' }}>{modal.type}</span>
-                  </div>
-                </div>
-                <button onClick={closeModal} style={{ background: 'transparent', border: '1px solid #1e4040', color: '#4a7878', cursor: 'pointer', width: 30, height: 30, borderRadius: 9, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, transition: 'all 0.15s' }}
-                  onMouseEnter={e => { e.currentTarget.style.borderColor='#2a5a5a'; e.currentTarget.style.color='#fff' }}
-                  onMouseLeave={e => { e.currentTarget.style.borderColor='#1e4040'; e.currentTarget.style.color='#4a7878' }}>×</button>
-              </div>
-
-              {/* Step pills */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20 }}>
-                {['Amount', 'Review'].map((label, i) => (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <div style={{ width: 18, height: 18, borderRadius: '50%', fontSize: 9, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', background: modalStep > i ? accent : modalStep === i+1 ? accent+'20' : '#0d2828', border: `1px solid ${modalStep >= i+1 ? accent : '#1a3838'}`, color: modalStep > i ? '#071e1e' : modalStep === i+1 ? accent : '#2a5050' }}>
-                      {i+1}
-                    </div>
-                    <span style={{ fontSize: 10, color: modalStep === i+1 ? '#7ababa' : '#2a5050' }}>{label}</span>
-                    {i === 0 && <div style={{ width: 18, height: 1, background: '#1a3838' }} />}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* STEP 1 — Amount */}
-            {modalStep === 1 && (() => {
-              const avail = getAvailable(modal.type, modal.asset)
-              const curAmt = parseFloat(modalAmount) || 0
-              const sliderPct = avail > 0 ? Math.round(Math.min(curAmt / avail, 1) * 100) : 0
-              const isOverMax = avail > 0 && curAmt > avail
-              const isEmpty = curAmt <= 0
-              const canReview = !isEmpty && !isOverMax
-
-              const btnBg = isOverMax
-                ? 'linear-gradient(135deg, #ef4444 0%, #b91c1c 100%)'
-                : canReview
-                  ? `linear-gradient(135deg, ${accent} 0%, ${isBorrowSide ? '#d97706' : '#0d9488'} 100%)`
-                  : 'transparent'
-              const btnBorder = isEmpty ? `1px solid #1e4040` : 'none'
-              const btnColor = isOverMax || canReview ? '#071e1e' : '#4a7878'
-              const btnLabel = isEmpty
-                ? 'Enter an amount'
-                : isOverMax
-                  ? modal.type === 'repay' ? 'Cannot repay more than you owe' : modal.type === 'borrow' ? 'Exceeds borrow limit' : 'Exceeds available balance'
-                  : 'Review Transaction →'
-
-              // HF preview vars
-              const hfToBarPct = (hf) => hf === null ? 1 : Math.min(Math.log1p(hf) / Math.log1p(75), 1)
-              const displayHF    = curAmt > 0 ? previewHF : healthFactor
-              const displayColor = displayHF === null ? '#14b8a6' : displayHF >= 50 ? '#14b8a6' : displayHF >= 10 ? '#34d399' : displayHF >= 3 ? '#a3e635' : displayHF >= 1.5 ? '#f59e0b' : '#ef4444'
-              const displayLabel = displayHF === null ? 'Safe' : displayHF >= 50 ? 'Very Safe' : displayHF >= 10 ? 'Very Safe' : displayHF >= 3 ? 'Safe' : displayHF >= 1.5 ? 'Monitor' : 'At Risk'
-              const barPct       = hfToBarPct(displayHF)
-              const beforeHF     = healthFactor
-              const beforeColor  = beforeHF === null ? '#14b8a6' : beforeHF >= 50 ? '#14b8a6' : beforeHF >= 10 ? '#34d399' : beforeHF >= 3 ? '#a3e635' : beforeHF >= 1.5 ? '#f59e0b' : '#ef4444'
-              const beforePct    = hfToBarPct(beforeHF)
-              const showBefore   = curAmt > 0 && beforeHF !== displayHF
-
-              const noCollateral = modal.type === 'borrow' && avail === 0
-
-              return (
-                <div style={{ padding: '0 26px 26px' }}>
-                  {/* Stats row */}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', background: '#071818', border: '1px solid #0d2424', borderRadius: 10, padding: '12px 15px', marginBottom: 14 }}>
-                    <div>
-                      <p style={{ fontSize: 8, color: '#5a8888', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 3 }}>{modal.type === 'supply' || modal.type === 'withdraw' ? 'Supply APY' : 'Borrow Rate'}</p>
-                      <p style={{ fontSize: 16, fontWeight: 700, color: accent, fontFamily: 'IBM Plex Mono', lineHeight: 1 }}>{modal.type === 'supply' || modal.type === 'withdraw' ? fmtPct(modal.asset.supplyApy) : fmtPct(modal.asset.borrowRate)}</p>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <p style={{ fontSize: 8, color: '#5a8888', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 3 }}>Available</p>
-                      <p style={{ fontSize: 16, fontWeight: 700, color: '#fff', fontFamily: 'IBM Plex Mono', lineHeight: 1 }}>{fmtToken(avail, 4)}</p>
-                      <p style={{ fontSize: 8, color: '#5a8888', marginTop: 2 }}>{modal.asset.symbol}</p>
-                    </div>
-                  </div>
-
-                  {/* No-collateral gate — shown when user has nothing supplied */}
-                  {noCollateral ? (
-                    <>
-                      <div style={{ background: '#f59e0b0d', border: '1px solid #f59e0b30', borderRadius: 12, padding: '18px 18px', marginBottom: 14 }}>
-                        <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-                          <div style={{ flexShrink: 0, width: 32, height: 32, borderRadius: 9, background: '#f59e0b18', border: '1px solid #f59e0b35', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16 }}>
-                            ⚠
-                          </div>
-                          <div>
-                            <p style={{ fontSize: 13, fontWeight: 700, color: '#fbbf24', marginBottom: 5, lineHeight: 1.3 }}>
-                              Supply collateral first
-                            </p>
-                            <p style={{ fontSize: 11, color: '#a07830', lineHeight: 1.6 }}>
-                              You have no supplied assets. To borrow {modal.asset.symbol}, you need to supply an asset as collateral first — your borrow limit is based on its value.
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div style={{ background: '#071818', border: '1px solid #0d2424', borderRadius: 10, padding: '13px 15px', marginBottom: 18, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <span style={{ fontSize: 10, color: '#3a6060' }}>Your borrow limit</span>
-                        <span style={{ fontSize: 13, fontWeight: 700, color: '#2a5050', fontFamily: 'IBM Plex Mono' }}>$0.00</span>
-                      </div>
-
-                      <button onClick={closeModal}
-                        style={{ width: '100%', padding: '14px', borderRadius: 12, fontSize: 13, fontWeight: 700, background: 'linear-gradient(135deg, #14b8a6 0%, #0d9488 100%)', border: 'none', color: '#071e1e', cursor: 'pointer', letterSpacing: '-0.01em' }}>
-                        Go Supply an Asset →
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                  {/* Slider — above input */}
-                  <div style={{ marginBottom: 14 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                      <span style={{ fontSize: 9, color: '#4a7878' }}>0%</span>
-                      <span style={{ fontSize: 9, fontWeight: 600, color: accent, fontFamily: 'IBM Plex Mono' }}>{sliderPct}%</span>
-                      <span onClick={() => setModalAmount(String(avail.toFixed(6)))}
-                        style={{ fontSize: 9, fontWeight: 600, color: accent, cursor: 'pointer', textDecoration: 'underline', textDecorationStyle: 'dotted', textUnderlineOffset: 2 }}>Max</span>
-                    </div>
-                    <div className="modal-slider-wrap">
-                      <div className="modal-slider-track" />
-                      <div className="modal-slider-fill" style={{ width: `${sliderPct}%` }} />
-                      <input type="range" min="0" max="100" step="1" value={sliderPct}
-                        onChange={e => { const pct = parseInt(e.target.value); setModalAmount(pct === 0 ? '' : pct === 100 ? String(avail.toFixed(6)) : String((avail * pct / 100).toFixed(6))) }}
-                        className="modal-slider" />
-                    </div>
-                  </div>
-
-                  {/* Input */}
-                  <div style={{ position: 'relative', marginBottom: 8 }}>
-                    <input type="number" placeholder="0.00" value={modalAmount} onChange={e => setModalAmount(e.target.value)} autoFocus
-                      style={{ width: '100%', background: '#071a1a', border: `1px solid ${isOverMax ? '#ef444460' : '#163030'}`, borderRadius: 12, padding: '15px 80px 15px 15px', fontSize: 22, color: '#fff', outline: 'none', fontFamily: 'IBM Plex Mono, monospace', boxSizing: 'border-box' }}
-                      onFocus={e => e.target.style.borderColor = isOverMax ? '#ef444480' : '#1e5050'}
-                      onBlur={e => e.target.style.borderColor = isOverMax ? '#ef444460' : '#163030'} />
-                    <div style={{ position: 'absolute', right: 13, top: '50%', transform: 'translateY(-50%)', display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <div style={{ width: 16, height: 16, borderRadius: 4, background: modal.asset.color+'20', border: `1px solid ${modal.asset.color}30`, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-                        <img src={modal.asset.icon} alt={modal.asset.symbol} style={{ width: 11, height: 11, objectFit: 'contain' }} />
-                      </div>
-                      <span style={{ fontSize: 11, color: '#5a8e8e', fontWeight: 600 }}>{modal.asset.symbol}</span>
-                    </div>
-                  </div>
-                  <p style={{ fontSize: 10, color: '#5a8888', fontFamily: 'IBM Plex Mono', marginBottom: isOverMax ? 6 : 12 }}>≈ {fmtUSD(curAmt * modal.asset.price)}</p>
-
-                  {/* Over-max warning */}
-                  {isOverMax && (
-                    <div style={{ background: '#ef444412', border: '1px solid #ef444430', borderRadius: 8, padding: '8px 12px', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 7 }}>
-                      <span style={{ fontSize: 13, lineHeight: 1 }}>⚠</span>
-                      <p style={{ fontSize: 10, color: '#f87171', lineHeight: 1.5 }}>
-                        {modal.type === 'borrow'
-                          ? `Amount exceeds your borrow limit of ${fmtToken(avail, 4)} ${modal.asset.symbol}`
-                          : modal.type === 'repay'
-                            ? `You only owe ${fmtToken(avail, 4)} ${modal.asset.symbol} — you can't repay more than your outstanding debt`
-                            : `Amount exceeds available balance of ${fmtToken(avail, 4)} ${modal.asset.symbol}`}
-                      </p>
-                    </div>
-                  )}
-
-                  {/* HF preview — only relevant when user has active borrows */}
-                  {(isBorrowSide || totalBorrowedUSD > 0) && <div style={{ background: '#071818', border: `1px solid ${displayColor}28`, borderRadius: 10, padding: '14px 16px', marginBottom: 18 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                      <span style={{ fontSize: 10, color: '#5a8888', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Health Factor</span>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                        {showBefore && <span style={{ fontSize: 12, fontFamily: 'IBM Plex Mono', color: beforeColor, opacity: 0.45 }}>{beforeHF === null ? '∞' : beforeHF.toFixed(2)}</span>}
-                        {showBefore && <span style={{ fontSize: 9, color: '#3a5a5a' }}>→</span>}
-                        <span style={{ fontSize: 17, fontWeight: 700, fontFamily: 'IBM Plex Mono', color: displayColor }}>{displayHF === null ? '∞' : displayHF.toFixed(2)}</span>
-                        <span style={{ fontSize: 9, fontWeight: 600, color: displayColor, background: displayColor+'18', border: `1px solid ${displayColor}35`, borderRadius: 5, padding: '2px 7px' }}>{displayLabel}</span>
-                      </div>
-                    </div>
-                    <div style={{ position: 'relative', height: 7, background: '#0a1e1e', borderRadius: 4 }}>
-                      {showBefore && <div style={{ position: 'absolute', top: 0, left: 0, height: '100%', borderRadius: 4, width: `${beforePct*100}%`, background: beforeColor+'30', transition: 'width 0.4s' }} />}
-                      <div style={{ position: 'absolute', top: 0, left: 0, height: '100%', borderRadius: 4, width: `${barPct*100}%`, background: `linear-gradient(90deg, ${displayColor}70, ${displayColor})`, boxShadow: `0 0 8px ${displayColor}55`, transition: 'width 0.4s, background 0.4s' }} />
-                      <div style={{ position: 'absolute', top: -3, bottom: -3, left: `${Math.log1p(1) / Math.log1p(75) * 100}%`, width: 1.5, background: '#ef444460' }} />
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 7 }}>
-                      <span style={{ fontSize: 8, color: '#ef444470' }}>← Liquidation at 1.0</span>
-                      <span style={{ fontSize: 8, color: '#14b8a650' }}>Safe ≥ 3.0 →</span>
-                    </div>
-                  </div>}
-
-                  {/* Supply projections — borrow power + yield */}
-                  {modal.type === 'supply' && (() => {
-                    const supplyUSD    = curAmt * modal.asset.price
-                    const borrowPower  = supplyUSD * (modal.asset.ltv / 100)
-                    const yieldAnnual  = curAmt * (modal.asset.supplyApy / 100)
-                    const yieldMonthly = yieldAnnual / 12
-                    const hasAmt       = curAmt > 0
-                    return (
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14 }}>
-                        {/* Borrow power */}
-                        <div style={{ background: '#071818', border: `1px solid ${hasAmt ? '#f59e0b28' : '#0d2424'}`, borderRadius: 10, padding: '12px 14px', transition: 'border-color 0.3s' }}>
-                          <p style={{ fontSize: 8, color: '#5a7070', textTransform: 'uppercase', letterSpacing: '0.09em', marginBottom: 6 }}>Borrow Power</p>
-                          <p style={{ fontSize: 15, fontWeight: 700, fontFamily: 'IBM Plex Mono', color: hasAmt ? '#f59e0b' : '#2a4040', lineHeight: 1, transition: 'color 0.3s' }}>
-                            {hasAmt ? fmtUSD(borrowPower) : '$—'}
-                          </p>
-                          <p style={{ fontSize: 8, color: hasAmt ? '#7a5520' : '#1a3030', marginTop: 4, transition: 'color 0.3s' }}>
-                            {hasAmt ? `${modal.asset.ltv}% LTV on ${fmtUSD(supplyUSD)}` : `${modal.asset.ltv}% LTV applied`}
-                          </p>
-                        </div>
-                        {/* Yield */}
-                        <div style={{ background: '#071818', border: `1px solid ${hasAmt ? '#14b8a628' : '#0d2424'}`, borderRadius: 10, padding: '12px 14px', transition: 'border-color 0.3s' }}>
-                          <p style={{ fontSize: 8, color: '#5a7070', textTransform: 'uppercase', letterSpacing: '0.09em', marginBottom: 6 }}>Est. Yield</p>
-                          <p style={{ fontSize: 15, fontWeight: 700, fontFamily: 'IBM Plex Mono', color: hasAmt ? '#14b8a6' : '#2a4040', lineHeight: 1, transition: 'color 0.3s' }}>
-                            {hasAmt ? `${fmtToken(yieldAnnual, 4)} ${modal.asset.symbol}` : '—'}
-                          </p>
-                          <p style={{ fontSize: 8, color: hasAmt ? '#2a6a5a' : '#1a3030', marginTop: 4, transition: 'color 0.3s' }}>
-                            {hasAmt ? `per year · ${fmtToken(yieldMonthly, 4)} ${modal.asset.symbol}/mo` : `${modal.asset.supplyApy}% APY`}
-                          </p>
-                        </div>
-                      </div>
-                    )
-                  })()}
-
-                  <button onClick={() => canReview && setModalStep(2)}
-                    style={{ width: '100%', padding: '14px', borderRadius: 12, fontSize: 13, fontWeight: 700, background: btnBg, border: btnBorder, color: btnColor, cursor: canReview ? 'pointer' : 'default', transition: 'all 0.2s', letterSpacing: '-0.01em' }}>
-                    {btnLabel}
-                  </button>
-                    </>
-                  )}
-                </div>
-              )
-            })()}
-
-            {/* STEP 2 — Review */}
-            {modalStep === 2 && (
-              <div style={{ padding: '0 26px 26px' }}>
-                <div style={{ background: '#071818', border: '1px solid #0d2424', borderRadius: 12, padding: '15px 17px', marginBottom: 14 }}>
-                  <p style={{ fontSize: 10, color: '#3a6060', marginBottom: 5, textTransform: 'capitalize' }}>{modal.type}ing</p>
-                  <p style={{ fontSize: 24, fontWeight: 700, color: '#fff', fontFamily: 'IBM Plex Mono', lineHeight: 1 }}>{fmtToken(parseFloat(modalAmount), 6)} {modal.asset.symbol}</p>
-                  <p style={{ fontSize: 11, color: '#5a8888', marginTop: 4, fontFamily: 'IBM Plex Mono' }}>≈ {fmtUSD(parseFloat(modalAmount) * modal.asset.price)}</p>
-                </div>
-
-                <div style={{ border: '1px solid #0d2424', borderRadius: 12, overflow: 'hidden', marginBottom: 14 }}>
-                  {[
-                    { label: modal.type === 'supply' || modal.type === 'withdraw' ? 'Supply APY' : 'Borrow Rate', value: modal.type === 'supply' || modal.type === 'withdraw' ? fmtPct(modal.asset.supplyApy) : fmtPct(modal.asset.borrowRate), color: accent },
-                    { label: 'Max LTV',        value: `${modal.asset.ltv}%`,    color: '#8ecece' },
-                    { label: 'Network',        value: 'Canton Network',          color: '#8ecece' },
-                    { label: 'Settlement',     value: 'T+0',                     color: '#8ecece' },
-                    { label: 'MEV Protection', value: 'Enabled',                 color: '#14b8a6' },
-                    { label: 'Execution',      value: 'Confidential',            color: '#14b8a6' },
-                  ].map((row, i) => (
-                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 15px', borderTop: i > 0 ? '1px solid #071818' : 'none', background: i%2===0 ? 'transparent' : '#071818' }}>
-                      <span style={{ fontSize: 10, color: '#3a6060' }}>{row.label}</span>
-                      <span style={{ fontSize: 10, fontWeight: 600, color: row.color, fontFamily: 'IBM Plex Mono' }}>{row.value}</span>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Privacy attestation */}
-                <div style={{ background: '#14b8a608', border: '1px solid #14b8a622', borderRadius: 12, padding: '13px 15px', marginBottom: 18, display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-                  <div style={{ flexShrink: 0, marginTop: 1 }}><IconShield size={15} color="#14b8a6" /></div>
-                  <div>
-                    <p style={{ fontSize: 11, fontWeight: 600, color: '#14b8a6', marginBottom: 4 }}>Encrypted on Canton Network</p>
-                    <p style={{ fontSize: 10, color: '#3a6060', lineHeight: 1.55 }}>Your position is processed with confidential smart contracts and is not visible to other market participants.</p>
-                  </div>
-                </div>
-
-                <div style={{ display: 'flex', gap: 10 }}>
-                  <button onClick={() => setModalStep(1)} style={{ padding: '13px 16px', borderRadius: 12, fontSize: 12, fontWeight: 600, background: 'transparent', border: '1px solid #1e4040', color: '#4a7878', cursor: 'pointer', transition: 'all 0.15s', flexShrink: 0 }}
-                    onMouseEnter={e => { e.currentTarget.style.borderColor='#2a5a5a'; e.currentTarget.style.color='#fff' }}
-                    onMouseLeave={e => { e.currentTarget.style.borderColor='#1e4040'; e.currentTarget.style.color='#4a7878' }}>← Back</button>
-                  <button onClick={handleConfirm} style={{ flex: 1, padding: '13px', borderRadius: 12, fontSize: 13, fontWeight: 700, background: `linear-gradient(135deg, ${accent} 0%, ${isBorrowSide ? '#d97706' : '#0d9488'} 100%)`, border: 'none', color: '#071e1e', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, transition: 'opacity 0.15s' }}
-                    onMouseEnter={e => e.currentTarget.style.opacity='0.88'} onMouseLeave={e => e.currentTarget.style.opacity='1'}>
-                    {modal.type === 'supply' ? `Confirm Supply ${modal.asset.symbol}` : modal.type === 'borrow' ? `Confirm Borrow ${modal.asset.symbol}` : modal.type === 'repay' ? `Confirm Repay ${modal.asset.symbol}` : `Confirm Withdraw ${modal.asset.symbol}`}
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
+        <ActionModal modal={modal} onClose={closeModal} positions={positions} setPositions={setPositions} balance={balance} />
       )}
       <Footer />
     </div>
@@ -2119,6 +2688,8 @@ function AppRoutes() {
     setTimeout(() => { nav('/waitlisted'); setSubmitting(false) }, 1800)
   }
 
+  const [positions, setPositions] = useState({ supplied: {}, borrowed: {} })
+
   const handleLogout = () => {
     setPartyId(DEMO_PARTY_ID); setEmail(''); setBalance(DEMO_BALANCE)
     setSteps({ email: false, twitter: false, telegram: false, partyId: false })
@@ -2145,8 +2716,9 @@ function AppRoutes() {
           />
         } />
         <Route path="/waitlisted" element={<SubmittedScreen email={email} partyId={partyId} onLogout={handleLogout} onEnterMarkets={() => nav('/markets')} />} />
-        <Route path="/markets"   element={<MarketsScreen partyId={partyId} balance={balance} onLogout={handleLogout} connected={true} />} />
-        <Route path="/app"       element={<MarketsScreen partyId={null} balance={null} onLogout={null} connected={false} onConnect={() => nav('/')} />} />
+        <Route path="/markets"            element={<MarketsScreen partyId={partyId} balance={balance} onLogout={handleLogout} connected={true} positions={positions} setPositions={setPositions} />} />
+        <Route path="/markets/:assetId"   element={<AssetDetailScreen partyId={partyId} balance={balance} onLogout={handleLogout} connected={true} positions={positions} setPositions={setPositions} />} />
+        <Route path="/app"                element={<MarketsScreen partyId={null} balance={null} onLogout={null} connected={false} onConnect={() => nav('/')} positions={positions} setPositions={setPositions} />} />
         <Route path="/terms"     element={<TermsScreen />} />
         <Route path="/privacy"   element={<PrivacyScreen />} />
       </Routes>
